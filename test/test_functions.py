@@ -127,6 +127,84 @@ def test_item_area_none_found():
     assert api.stac_item_area(item) == ""
 
 
+# ─── stac_api.build_stac_item (Extension-Deklaration / Normalisierung) ──────
+
+_PROJ_SCHEMA = "https://stac-extensions.github.io/projection/v1.1.0/schema.json"
+_FILE_SCHEMA = "https://stac-extensions.github.io/file/v2.1.0/schema.json"
+
+# Minimal-Item im Format, das die swisstopo-STAC-API v1 liefert: Extension-
+# Felder in den Assets, aber ohne "stac_extensions"-Deklaration.
+def _v1_item():
+    return {
+        "id": "kry-2024-08-23t09110000",
+        "properties": {"datetime": "2024-08-23T09:11:00Z"},
+        "geometry": {"type": "Polygon",
+                     "coordinates": [[[8.34, 46.68], [8.35, 46.68],
+                                      [8.35, 46.69], [8.34, 46.68]]]},
+        "bbox": [8.34, 46.68, 8.35, 46.69],
+        "assets": {
+            "a.tif": {"href": "https://example.invalid/a.tif", "gsd": 0.1,
+                      "proj:epsg": 2056, "file:checksum": "1220ABCDEF"},
+        },
+    }
+
+
+def test_build_item_declares_used_extensions():
+    built = api.build_stac_item(_v1_item(), _v1_item()["assets"])
+    assert built["stac_extensions"] == [_PROJ_SCHEMA, _FILE_SCHEMA]
+
+
+def test_build_item_extensions_follow_stac_version():
+    # stac_extensions muss laut Feldreihenfolge direkt nach stac_version stehen.
+    keys = list(api.build_stac_item(_v1_item(), _v1_item()["assets"]))
+    assert keys[:3] == ["type", "stac_version", "stac_extensions"]
+
+
+def test_build_item_declares_only_extensions_of_selected_assets():
+    # Asset ohne proj:epsg -> Projection darf nicht deklariert werden.
+    item = _v1_item()
+    assets = {"b.tif": {"href": "https://example.invalid/b.tif",
+                        "file:checksum": "1220abcdef"}}
+    assert api.build_stac_item(item, assets)["stac_extensions"] == [_FILE_SCHEMA]
+
+
+def test_build_item_without_extension_fields_omits_declaration():
+    # Leeres stac_extensions-Array wäre laut Spec unzulässig -> Feld entfällt.
+    item = _v1_item()
+    assets = {"c.tif": {"href": "https://example.invalid/c.tif", "gsd": 0.1}}
+    assert "stac_extensions" not in api.build_stac_item(item, assets)
+
+
+def test_build_item_keeps_extensions_declared_by_source():
+    item = _v1_item()
+    item["stac_extensions"] = ["https://example.invalid/custom/schema.json"]
+    built = api.build_stac_item(item, item["assets"])
+    assert built["stac_extensions"] == ["https://example.invalid/custom/schema.json",
+                                        _PROJ_SCHEMA, _FILE_SCHEMA]
+
+
+def test_build_item_lowercases_file_checksum():
+    # Die API liefert den Multihash gross, die File-Extension verlangt
+    # ^[a-f0-9]+$ – Hex ist case-insensitiv, der Wert bleibt also derselbe.
+    item = _v1_item()
+    built = api.build_stac_item(item, item["assets"])
+    assert built["assets"]["a.tif"]["file:checksum"] == "1220abcdef"
+
+
+def test_build_item_does_not_mutate_source_assets():
+    item = _v1_item()
+    api.build_stac_item(item, item["assets"])
+    assert item["assets"]["a.tif"]["file:checksum"] == "1220ABCDEF"
+
+
+def test_build_item_leaves_non_hex_checksum_untouched():
+    item = _v1_item()
+    assets = {"a.tif": {"href": "https://example.invalid/a.tif",
+                        "file:checksum": "sha256:XYZ"}}
+    built = api.build_stac_item(item, assets)
+    assert built["assets"]["a.tif"]["file:checksum"] == "sha256:XYZ"
+
+
 # ─── 0_GUI_gdwh_stac_monitor._fmt_size ─────────────────────────────────────
 
 def test_fmt_size_none():
@@ -190,6 +268,215 @@ def test_status_label_timeout():
 def test_status_label_other_error():
     text, tag = gui._status_label(-3)
     assert tag == "asset_warn"
+
+
+# ─── 0_GUI_gdwh_stac_monitor._sync_faulty_btn ──────────────────────────────
+#
+# Textfarbe des Buttons "Fehlerhafte anzeigen": rot, sobald die HEAD-Prüfung
+# fehlerhafte Assets gefunden hat. Getestet über einen Stub, der nur die von
+# _sync_faulty_btn benötigten Attribute mitbringt – so bleibt der Test ohne
+# Tk-Fenster lauffähig.
+
+_STATUS_OK    = {"status": 200}
+_STATUS_LARGE = {"status": -4}    # >50 GB, laut _asset_is_error kein Fehler
+_STATUS_ERR   = {"status": 404}
+
+
+class _BtnStub:
+    def __init__(self):
+        self.kw = {}
+
+    def config(self, **kw):
+        self.kw.update(kw)
+
+
+class _FilterVarStub:
+    def __init__(self, value):
+        self._value = value
+
+    def get(self):
+        return self._value
+
+
+class _AppStub:
+    """Minimaler Ersatz für StacMonitorApp mit den echten Methoden."""
+
+    _App = gui.StacMonitorApp
+    _SHOW_ALL_BTN_LABEL    = _App._SHOW_ALL_BTN_LABEL
+    _SHOW_FAULTY_BTN_LABEL = _App._SHOW_FAULTY_BTN_LABEL
+    _asset_matches     = staticmethod(_App._asset_matches)
+    _asset_is_error    = _App._asset_is_error
+    _has_faulty_assets = _App._has_faulty_assets
+    _sync_faulty_btn   = _App._sync_faulty_btn
+
+    def __init__(self, asset_info, filter_active=False, exts=(), visible=None):
+        self._asset_info = asset_info
+        self._exts = list(exts)
+        self._error_filter_var = _FilterVarStub(filter_active)
+        self._show_faulty_btn = _BtnStub()
+        self._visible_items = visible if visible is not None else [
+            {"id": "it1", "assets": {"a.tif": {"href": "https://x/a.tif"},
+                                     "b.laz": {"href": "https://x/b.laz"}}}]
+
+    def _active_extensions(self):
+        return self._exts
+
+    def _active_terms(self):
+        return []
+
+
+def _btn_style(**kwargs) -> str:
+    app = _AppStub(**kwargs)
+    app._sync_faulty_btn()
+    return app._show_faulty_btn.kw["style"]
+
+
+def test_faulty_btn_neutral_before_check():
+    assert _btn_style(asset_info={}) == "TButton"
+
+
+def test_faulty_btn_neutral_when_all_ok():
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_OK}}) == "TButton"
+
+
+def test_faulty_btn_neutral_for_large_asset():
+    # Status -4 ist das erwartete CloudFront-Verhalten, kein Fehler.
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_LARGE}}) == "TButton"
+
+
+def test_faulty_btn_red_on_error():
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_ERR}}) == "Red.TButton"
+
+
+def test_faulty_btn_amber_wins_while_filter_active():
+    # Bei aktiver Fehleransicht sind die Fehler sichtbar -> kein roter Hinweis.
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_ERR}},
+                      filter_active=True) == "Amber.TButton"
+
+
+def test_faulty_btn_neutral_when_error_filtered_out():
+    # Fehlerhaftes .tif per Extension-Filter ausgeblendet -> der Fehler-Filter
+    # würde nichts finden, also auch kein roter Hinweis.
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_ERR}},
+                      exts=[".laz"]) == "TButton"
+
+
+def test_faulty_btn_red_when_error_matches_filter():
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_ERR}},
+                      exts=[".tif"]) == "Red.TButton"
+
+
+def test_faulty_btn_neutral_without_visible_items():
+    # Zustand direkt nach einem Reload: Ergebnisse noch da, Liste schon leer.
+    assert _btn_style(asset_info={"it1": {"a.tif": _STATUS_ERR}},
+                      visible=[]) == "TButton"
+
+
+def test_faulty_btn_text_follows_filter_state():
+    app = _AppStub(asset_info={}, filter_active=True)
+    app._sync_faulty_btn()
+    assert app._show_faulty_btn.kw["text"] == gui.StacMonitorApp._SHOW_ALL_BTN_LABEL
+    app = _AppStub(asset_info={})
+    app._sync_faulty_btn()
+    assert app._show_faulty_btn.kw["text"] == gui.StacMonitorApp._SHOW_FAULTY_BTN_LABEL
+
+
+# ─── 0_GUI_gdwh_stac_monitor._export_stac_browser_links ────────────────────
+#
+# Der Export darf ausschliesslich Item-Links enthalten; die Asset-Links sind
+# Sache von "Asset-Download". Die Item-Auswahl muss zwischen beiden Exporten
+# identisch bleiben.
+
+_EXPORT_ITEMS = [
+    {"id": "it-mit-laz",
+     "properties": {"datetime": "2024-08-23T09:11:00Z"},
+     "assets": {"a.tif": {"href": "https://x/a.tif", "description": "Area: RHONE"},
+                "b.copc.laz": {"href": "https://x/b.copc.laz"}}},
+    {"id": "it-nur-tif",
+     "properties": {"datetime": "2015-08-05T09:23:00Z"},
+     "assets": {"c.tif": {"href": "https://x/c.tif"}}},
+]
+
+
+class _ExportAppStub(_AppStub):
+    """Stub für die Text-Exporte; erbt die Filter-Helfer von _AppStub."""
+
+    _env_var = property(lambda self: _FilterVarStub("PROD"))
+    _dark = False
+
+    def __init__(self, exts=()):
+        super().__init__(asset_info={}, exts=exts, visible=_EXPORT_ITEMS)
+
+    def _is_checked(self, node_id):
+        return True
+
+    def _asset_is_large(self, item_id, asset_key):
+        return False
+
+    def _log_write(self, msg):
+        pass
+
+
+def _run_export(monkeypatch, methode, exts=()):
+    """Ruft einen Export auf und gibt den erzeugten Textinhalt zurück."""
+    erfasst = {}
+
+    class _DialogStub:
+        def __init__(self, parent, dark, title, content, **kw):
+            erfasst["content"] = content
+
+    monkeypatch.setattr(gui, "ExportPreviewDialog", _DialogStub)
+    monkeypatch.setattr(gui, "messagebox",
+                        type("M", (), {"showwarning": staticmethod(lambda *a: None),
+                                       "showinfo": staticmethod(lambda *a: None)}))
+    methode(_ExportAppStub(exts=exts))
+    return erfasst.get("content", "")
+
+
+def test_browser_export_contains_only_item_links(monkeypatch):
+    content = _run_export(monkeypatch, gui.StacMonitorApp._export_stac_browser_links)
+    assert "/browser/index.html#/collections/" in content
+    # Kein einziger Asset-Href darf auftauchen.
+    assert "https://x/" not in content
+    assert "asset:" not in content
+
+
+def test_browser_export_lists_every_selected_item(monkeypatch):
+    content = _run_export(monkeypatch, gui.StacMonitorApp._export_stac_browser_links)
+    assert content.count("item: ") == len(_EXPORT_ITEMS)
+
+
+def _exported_item_ids(content):
+    """Item-IDs aus einem Textexport. Vergleicht die Auswahl unabhängig davon,
+    was sonst noch auf der item-Zeile steht (der Asset-Export hängt dort den
+    STAC-Browser-Link an)."""
+    return [z[len("item: "):].split(";")[0]
+            for z in content.splitlines() if z.startswith("item: ")]
+
+
+def test_browser_and_download_export_select_same_items(monkeypatch):
+    # Der .laz-Filter lässt nur das erste Item übrig – in beiden Exporten.
+    browser = _run_export(monkeypatch, gui.StacMonitorApp._export_stac_browser_links,
+                          exts=[".laz"])
+    download = _run_export(monkeypatch, gui.StacMonitorApp._create_download_links,
+                           exts=[".laz"])
+    assert _exported_item_ids(browser) == _exported_item_ids(download) == ["it-mit-laz"]
+
+
+def test_download_export_still_contains_asset_links(monkeypatch):
+    # Gegenprobe: der Asset-Export darf die Hrefs nicht verloren haben.
+    content = _run_export(monkeypatch, gui.StacMonitorApp._create_download_links)
+    assert "https://x/a.tif" in content
+
+
+def test_download_export_item_line_carries_browser_link(monkeypatch):
+    # Die item-Zeile trägt den STAC-Browser-Link direkt hinter dem Semikolon.
+    content = _run_export(monkeypatch, gui.StacMonitorApp._create_download_links)
+    item_zeilen = [z for z in content.splitlines() if z.startswith("item: ")]
+    assert item_zeilen, "keine item-Zeile im Export"
+    for zeile in item_zeilen:
+        iid = zeile[len("item: "):].split(";")[0]
+        assert zeile == f"item: {iid}; {api.browser_url('PROD', iid, include_lang=False)}"
 
 
 # ─── gdwh_api._parse_custom_attributes (Auftragstyp/Area/Jahr-Extraktion) ──

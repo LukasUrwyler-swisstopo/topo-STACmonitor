@@ -5,6 +5,10 @@ GUI-Tool zur Überwachung der **STAC-Collection**
 BGDI, sowie DataPackages im **Geodata-Warehouse (GDWH)**.
 Read-only-GUI.
 
+Angebunden ist die **STAC-API v1** (`.../api/stac/v1/`, liefert
+`stac_version: 1.0.0`). Der Vorgänger `v0.9` antwortet noch, ist aber
+abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
+
 ## Schnellstart
 
 1. **Einmalig:** Für den STAC-Tab braucht das Script den `secrets/`-Ordner mit
@@ -70,16 +74,25 @@ Read-only-GUI.
 - **Fehlerhafte anzeigen** / **ITEMs ohne Thumbnail** / **ITEMs only with
   Thumbnail** – blenden die Baumansicht gezielt auf problematische bzw.
   unvollständige Items ein, bzw. auf Items, die nur aus einem Thumbnail
-  ohne echte Nutzdaten bestehen
-- **Download ausgewählte ITEMs/ASSETs** – lädt die ausgewählten Assets direkt auf die
-  eigene Festplatte (ein Unterordner pro Item). Assets über 50 GB werden
-  automatisch in Teilstücken heruntergeladen, da sie sonst am
-  CloudFront-Limit scheitern würden
-- **create Download-Links** – erstellt ein Textfile mit den Download-Links
-  der Auswahl zum Weitergeben an Kunden; bei Assets über 50 GB inkl.
-  Hinweis auf die nötige Download-Methode
-- **Weitere Exporte** – Download-Links als JSON, Asset-Tabelle als CSV,
-  STAC-Browser-Links als TXT
+  ohne echte Nutzdaten bestehen. **Fehlerhafte anzeigen** wird nach der
+  HEAD-Prüfung **rot**, falls es unter den aktuellen Filtereinstellungen
+  fehlerhafte Assets gibt – ohne Fehler bleibt die Schrift neutral
+- Gruppe **Export Links** – erzeugt Textdateien zur Auswahl, jeweils mit
+  Vorschau vor dem Speichern:
+  - **STAC-Browser** – ausschliesslich die STAC-Browser-Links der Items
+    (TXT), inkl. Jahr und Area als Info-Zeile. Bewusst ohne Asset-Links;
+    die Item-Auswahl ist dieselbe wie bei **Asset-Download**
+  - **STAC-Item** – die Auswahl als valide STAC-1.0.0-ItemCollection
+    (GeoJSON FeatureCollection), also maschinenlesbar für pystac, GDAL/OGR
+    (STACIT) oder QGIS – inkl. der von der API nicht mitgelieferten
+    `stac_extensions`-Deklaration
+  - **Asset-Download** – Download-Links der Auswahl zum Weitergeben an
+    Kunden, je Item zusätzlich der STAC-Browser-Link auf der `item`-Zeile;
+    bei Assets über 50 GB inkl. Hinweis auf die nötige Download-Methode
+- Gruppe **direkter Download** → **Download Assets** – lädt die ausgewählten
+  Assets direkt auf die eigene Festplatte (ein Unterordner pro Item). Assets
+  über 50 GB werden automatisch in Teilstücken heruntergeladen, da sie sonst
+  am CloudFront-Limit scheitern würden
 - **Kartenviewer** – ausgewählte GeoTIFFs bzw. Tagesübersichten direkt in
   map.geo.admin.ch anzeigen, wahlweise im Browser oder in einem
   angedockten Viewer-Fenster

@@ -31,9 +31,13 @@ COLLECTION_ID = "ch.swisstopo.spezialbefliegungen"
 LARGE_ASSET_THRESHOLD_BYTES = 50 * 1024 ** 3
 DEFAULT_DOWNLOAD_CHUNK_BYTES = 20 * 1024 ** 3
 
+# STAC-API-Basis je Umgebung. Pfadsegment ist "v1" (nicht "v1.0" – das liefert
+# 404); die API deklariert darunter stac_version "1.0.0". Der abgekündigte
+# v0.9-Endpunkt läuft noch parallel, liefert aber die alten Extension-Feldnamen
+# (eo:gsd statt gsd, checksum:multihash statt file:checksum).
 ENVIRONMENTS = {
-    "INT":  "https://sys-data.int.bgdi.ch/api/stac/v0.9/",
-    "PROD": "https://data.geo.admin.ch/api/stac/v0.9/",
+    "INT":  "https://sys-data.int.bgdi.ch/api/stac/v1/",
+    "PROD": "https://data.geo.admin.ch/api/stac/v1/",
 }
 
 # Hash-Routing-Basis des STAC-Browsers je Umgebung (für Kunden-Weitergabe).
@@ -632,6 +636,65 @@ def _ensure_wgs84(geometry: Optional[Dict], bbox: Optional[List[float]]) -> Tupl
     return neue_geometry, neue_bbox
 
 
+# Präfix der Extension-Felder -> Schema-URI, für die Deklaration in
+# "stac_extensions". Die swisstopo-API liefert Extension-Felder (proj:epsg,
+# file:checksum), deklariert sie aber nicht – ohne Deklaration beanstanden
+# Validatoren (stac-validator, pystac) das exportierte Item.
+#
+# Projection bewusst v1.1.0 und nicht v2.0.0: v2 hat proj:epsg durch proj:code
+# ersetzt, die API liefert weiterhin proj:epsg.
+#
+# Nur Extensions mit tatsächlich publiziertem Schema sind aufgeführt. Für die
+# v0.9-Felder eo:gsd und checksum:multihash gibt es keines: eo:gsd wurde in der
+# EO-Extension durch das Common-Metadata-Feld gsd ersetzt (so liefert es v1
+# heute auch), und die Checksum-Extension wurde zugunsten der File-Extension
+# zurückgezogen. Felder mit unbekanntem Präfix werden daher übersprungen.
+_EXTENSION_SCHEMAS = {
+    "proj": "https://stac-extensions.github.io/projection/v1.1.0/schema.json",
+    "file": "https://stac-extensions.github.io/file/v2.1.0/schema.json",
+}
+
+
+# Die File-Extension verlangt file:checksum als Hex in Kleinschreibung
+# (Pattern ^[a-f0-9]+$), die swisstopo-API liefert den Multihash aber in
+# Grossschreibung – damit scheitert die Schema-Validierung. Hex ist
+# case-insensitiv, das Umschreiben ist also verlustfrei und betrifft nur den
+# Export (Upstream-Thema: beim Wechsel von checksum:multihash auf file:checksum
+# wurde die Schreibweise nicht mit angepasst).
+_HEX_RE = re.compile(r"^[0-9a-fA-F]+$")
+
+
+def _normalize_assets(assets: Dict) -> Dict:
+    """Liefert eine Kopie der Assets mit spec-konform kleingeschriebenem
+    file:checksum. Bewusst eine Kopie, damit die interne Datenhaltung des Tools
+    (die Original-Items der API) unverändert bleibt."""
+    normalisiert = {}
+    for key, asset in assets.items():
+        if isinstance(asset, dict):
+            pruefsumme = asset.get("file:checksum")
+            if (isinstance(pruefsumme, str) and _HEX_RE.match(pruefsumme)
+                    and pruefsumme != pruefsumme.lower()):
+                asset = {**asset, "file:checksum": pruefsumme.lower()}
+        normalisiert[key] = asset
+    return normalisiert
+
+
+def _collect_extensions(properties: Dict, assets: Dict) -> List[str]:
+    """Sammelt die Schema-URIs aller Extensions, deren Felder ("praefix:feld")
+    in den Properties oder in mindestens einem Asset vorkommen. Präfixlose
+    Felder (z.B. gsd, datetime – Common Metadata) brauchen keine Deklaration.
+    Reihenfolge folgt _EXTENSION_SCHEMAS, ist also stabil."""
+    praefixe = set()
+    for container in (properties, *assets.values()):
+        if not isinstance(container, dict):
+            continue
+        for key in container:
+            praefix, _, feld = key.partition(":")
+            if feld:
+                praefixe.add(praefix)
+    return [uri for praefix, uri in _EXTENSION_SCHEMAS.items() if praefix in praefixe]
+
+
 def build_stac_item(item: Dict, assets: Dict) -> Dict:
     """Baut ein valides STAC-1.0.0-Item (GeoJSON Feature) für den Export.
 
@@ -639,8 +702,14 @@ def build_stac_item(item: Dict, assets: Dict) -> Dict:
     valides Item der swisstopo-API ist) und ersetzt nur "assets" durch die vom
     Aufrufer gefilterte Auswahl (z.B. Extension-/Checkbox-Filter im GUI).
     Die interne Datenhaltung des Tools bleibt davon unberührt.
+
+    Damit das Ergebnis gegen die Schemas validiert, kommen zwei Korrekturen
+    dazu, die die API selbst nicht liefert: "stac_extensions" wird um die
+    tatsächlich benutzten Extensions ergänzt (siehe _EXTENSION_SCHEMAS) und
+    file:checksum auf Kleinschreibung normalisiert (siehe _normalize_assets).
     """
     geometry, bbox = _ensure_wgs84(item.get("geometry"), item.get("bbox"))
+    assets = _normalize_assets(assets)
 
     properties = dict(item.get("properties", {}))
     if not properties.get("datetime"):
@@ -649,13 +718,23 @@ def build_stac_item(item: Dict, assets: Dict) -> Dict:
         acq = stac_item_acq_date(item)
         properties["datetime"] = f"{acq}T00:00:00Z" if acq else None
 
+    # Vom Original deklarierte Extensions behalten und um die im Export
+    # tatsächlich benutzten ergänzen (ohne Duplikate). Bezieht sich auf die
+    # gefilterten `assets`, damit nur deklariert wird, was auch drin ist.
+    extensions = list(item.get("stac_extensions") or [])
+    extensions += [uri for uri in _collect_extensions(properties, assets)
+                   if uri not in extensions]
+
     stac_item: Dict = {
-        # Fest auf "1.0.0", unabhängig von der Quell-API-Version (der swisstopo-
-        # API-Endpunkt liefert aktuell "0.9.0" in stac_version, obwohl die
-        # Item-Struktur bereits 1.0.0-kompatibel ist) – der Export soll immer
-        # ein STAC-1.0.0-Item deklarieren.
+        # Fest auf "1.0.0", unabhängig von der Quell-API-Version: der Export
+        # soll immer ein STAC-1.0.0-Item deklarieren (der v1-Endpunkt liefert
+        # bereits "1.0.0", der Alt-Endpunkt v0.9 lieferte "0.9.0").
         "type":         "Feature",
         "stac_version": "1.0.0",
+        # Position gemäss STAC-Feldreihenfolge direkt nach stac_version;
+        # weggelassen, wenn keine Extension benutzt wird (leeres Array wäre
+        # laut Spec unzulässig).
+        **({"stac_extensions": extensions} if extensions else {}),
         "id":           item.get("id"),
         "geometry":     geometry,
         "bbox":         bbox,
@@ -665,8 +744,6 @@ def build_stac_item(item: Dict, assets: Dict) -> Dict:
     }
     if item.get("collection"):
         stac_item["collection"] = item["collection"]
-    if item.get("stac_extensions"):
-        stac_item["stac_extensions"] = item["stac_extensions"]
     return stac_item
 
 

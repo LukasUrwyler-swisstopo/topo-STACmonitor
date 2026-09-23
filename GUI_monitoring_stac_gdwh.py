@@ -7,6 +7,7 @@ in einer Baumansicht. Funktionen:
   - Statistik: OK / Fehler / Gesamtgrösse
   - Item-JSON Detailansicht (Doppelklick oder Rechtsklick)
   - URL in Zwischenablage kopieren, im Browser öffnen
+  - Export der Auswahl als STAC-1.0.0-ItemCollection (Button "STAC-Item")
 
 Credentials: secrets/stac_credentials.json
 Format:      {"INT": {"username": "...", "password": "..."}, "PROD": {...}}
@@ -41,7 +42,7 @@ from api.stac_api import (
     get_item_direct, get_collection_items, filter_items,
     check_asset_info, download_asset, browser_url, asset_area,
     stac_item_year, stac_item_area, stac_item_acq_date,
-    is_cog_asset, is_ebo_ebn_asset, ebo_ebn_kml_item_id,
+    build_stac_item, is_cog_asset, is_ebo_ebn_asset, ebo_ebn_kml_item_id,
     is_thumbnail_asset, map_viewer_url, embed_viewer_url, union_bbox,
 )
 from api.gdwh_api import (
@@ -657,24 +658,29 @@ class StacMonitorApp(tk.Tk):
             command=self._toggle_only_thumb_filter, state="disabled")
         self._show_only_thumb_btn.pack(side="left", padx=(4, 0))
 
-        # ── Zeile 2: Export | Download | ASSET Viewer ───────────────────────
-        row2 = _group(bar_bottom, "Export")
+        # ── Zeile 2: Export Links | direkter Download | ASSET Viewer ────────
+        row2 = _group(bar_bottom, "Export Links")
 
         self._export_links_btn = ttk.Button(
-            row2, text="Export STAC Browser Links",
+            row2, text="STAC-Browser",
             command=self._export_stac_browser_links, state="disabled")
         self._export_links_btn.pack(side="left", padx=(0, 4))
 
+        self._export_stac_btn = ttk.Button(
+            row2, text="STAC-Item",
+            command=self._export_stac_json, state="disabled")
+        self._export_stac_btn.pack(side="left", padx=(0, 4))
+
         self._create_links_btn = ttk.Button(
-            row2, text="create Download-Links",
+            row2, text="Asset-Download",
             command=self._create_download_links, state="disabled")
         self._create_links_btn.pack(side="left")
 
         _sep(bar_bottom)
-        row_dl = _group(bar_bottom, "Download")
+        row_dl = _group(bar_bottom, "direkter Download")
 
         self._download_btn = ttk.Button(
-            row_dl, text="Download ausgewählte ITEMs/ASSETs",
+            row_dl, text="Download Assets",
             command=self._download_assets, state="disabled")
         self._download_btn.pack(side="left")
 
@@ -734,12 +740,8 @@ class StacMonitorApp(tk.Tk):
         # Variable steuert.
         self._error_filter_var = tk.BooleanVar(value=False)
         # Hält Text und Stil von self._show_faulty_btn (STAC-Funktionen,
-        # "Assets prüfen") synchron mit dem Filterzustand. Amber-Stil
-        # signalisiert, dass die gefilterte Ansicht aktiv ist.
-        self._error_filter_var.trace_add("write", lambda *_: self._show_faulty_btn.config(
-            text=self._SHOW_ALL_BTN_LABEL if self._error_filter_var.get()
-                 else self._SHOW_FAULTY_BTN_LABEL,
-            style="Amber.TButton" if self._error_filter_var.get() else "TButton"))
+        # "Assets prüfen") synchron mit dem Filterzustand.
+        self._error_filter_var.trace_add("write", lambda *_: self._sync_faulty_btn())
 
         self._tree = ttk.Treeview(
             frame, columns=self._COLS, show="tree headings", selectmode="browse")
@@ -1224,6 +1226,16 @@ class StacMonitorApp(tk.Tk):
             background=[("disabled", T["btn"]), ("active", T["btn_hover"]), ("pressed", T["sep"])],
             foreground=[("disabled", T["fg_dim"]), ("active", T["ok"])],
             relief=[("pressed", "flat")])
+        # Rot = nach der HEAD-Prüfung liegen fehlerhafte Assets vor (siehe
+        # _refresh_faulty_btn_style). Im disabled-Zustand bewusst gedimmt,
+        # damit ein noch nicht nutzbarer Button nicht alarmiert.
+        s.configure("Red.TButton",
+            background=T["btn"], foreground=T["err"],
+            bordercolor=T["sep"], relief="flat", padding=(8, 4), focuscolor=T["panel"])
+        s.map("Red.TButton",
+            background=[("disabled", T["btn"]), ("active", T["btn_hover"]), ("pressed", T["sep"])],
+            foreground=[("disabled", T["fg_dim"]), ("active", T["err"])],
+            relief=[("pressed", "flat")])
         s.configure("TRadiobutton",
             background=T["panel"], foreground=T["fg"], focuscolor=T["panel"])
         s.map("TRadiobutton",
@@ -1447,6 +1459,7 @@ class StacMonitorApp(tk.Tk):
             self._export_links_btn.config(state="disabled")
             self._download_btn.config(state="disabled")
             self._create_links_btn.config(state="disabled")
+            self._export_stac_btn.config(state="disabled")
             self._map_viewer_btn.config(state="disabled")
             self._start_load_spinner()
         else:
@@ -1558,6 +1571,38 @@ class StacMonitorApp(tk.Tk):
         self._error_filter_var.set(not self._error_filter_var.get())
         self._on_error_filter_toggle()
 
+    def _has_faulty_assets(self) -> bool:
+        """True, wenn der Fehler-Filter unter den aktuellen Filtereinstellungen
+        mindestens ein Asset finden würde. Bewertet mit demselben Prädikat wie
+        der Filter selbst (_asset_is_error) und über dieselbe Asset-Vorauswahl,
+        damit rote Markierung und gefilterte Ansicht nicht auseinanderlaufen.
+        Ungeprüfte Assets gelten dabei nicht als Fehler, vor der HEAD-Prüfung
+        ist das Ergebnis also False."""
+        exts  = self._active_extensions()
+        terms = self._active_terms()
+        for item in self._visible_items:
+            iid = item["id"]
+            for ak, aval in item.get("assets", {}).items():
+                if not self._asset_matches(aval.get("href", ""), ak, exts, terms):
+                    continue
+                if self._asset_is_error(iid, ak):
+                    return True
+        return False
+
+    def _sync_faulty_btn(self):
+        """Setzt Text und Stil von self._show_faulty_btn. Amber, solange die
+        gefilterte Ansicht aktiv ist (dann ist der Hinweis auf Fehler
+        überflüssig, man sieht sie ja gerade), sonst Rot bei vorhandenen
+        fehlerhaften Assets und andernfalls neutral."""
+        aktiv = self._error_filter_var.get()
+        if aktiv:
+            stil = "Amber.TButton"
+        else:
+            stil = "Red.TButton" if self._has_faulty_assets() else "TButton"
+        self._show_faulty_btn.config(
+            text=self._SHOW_ALL_BTN_LABEL if aktiv else self._SHOW_FAULTY_BTN_LABEL,
+            style=stil)
+
     def _item_has_thumbnail(self, item: Dict) -> bool:
         return any(is_thumbnail_asset(k) or is_thumbnail_asset(v.get("href", ""))
                    for k, v in item.get("assets", {}).items())
@@ -1642,6 +1687,9 @@ class StacMonitorApp(tk.Tk):
 
         self._visible_items = items
         self._populate_tree(items, exts, terms, errors_only)
+        # Nach jeder Filteränderung neu bewerten: ein Extension-Filter kann die
+        # fehlerhaften Assets aus- oder wieder einblenden.
+        self._sync_faulty_btn()
 
     def _populate_tree(self, items: List[Dict], exts: List[str], terms: List[str],
                         errors_only: bool = False):
@@ -1729,6 +1777,7 @@ class StacMonitorApp(tk.Tk):
         self._export_links_btn.config(state=state)
         self._download_btn.config(state=state)
         self._create_links_btn.config(state=state)
+        self._export_stac_btn.config(state=state)
         self._map_viewer_btn.config(state=state)
         self._viewer_win_btn.config(state=state)
         self._expand_toggle_btn.config(state=state)
@@ -2017,6 +2066,8 @@ class StacMonitorApp(tk.Tk):
     def _enable_error_filter_btn(self):
         self._assets_checked_once = True
         self._show_faulty_btn.config(state="normal")
+        # Erst jetzt liegen Prüfergebnisse vor -> ggf. rote Textfarbe setzen.
+        self._sync_faulty_btn()
 
     def _refresh_stats(self, ok: int, err: int, total_bytes: int):
         n_items  = len(self._visible_items)
@@ -2086,6 +2137,10 @@ class StacMonitorApp(tk.Tk):
     # ── Export ────────────────────────────────────────────────────────────────
 
     def _export_stac_browser_links(self):
+        """Schreibt je Item einen STAC-Browser-Link (Ansicht im Browser).
+        Auswahl und Blockaufbau sind identisch zu "Asset-Download", nur die
+        Asset-Links fehlen – ein Item erscheint also genau dann, wenn davon
+        mindestens ein Asset gefiltert und angehakt ist."""
         if not self._visible_items:
             messagebox.showwarning("Keine Daten", "Keine Items geladen.")
             return
@@ -2100,29 +2155,19 @@ class StacMonitorApp(tk.Tk):
             display = iid[len(_pfx):] if iid.startswith(_pfx) else iid
             year    = stac_item_year(item)
             area    = stac_item_area(item)
-            assets  = item.get("assets", {})
-            asset_entries = []
-            for ak, aval in assets.items():
-                href = aval.get("href", "")
-                if not self._asset_matches(href, ak, exts, terms):
-                    continue
-                if not self._is_checked(f"asset::{iid}::{ak}"):
-                    continue
-                asset_entries.append((ak, href))
-            if not asset_entries:
+            # Die Assets werden nur für die Auswahl ausgewertet (welche Items
+            # überhaupt vorkommen) – ausgegeben wird allein der Item-Link. Die
+            # Asset-Links liefert der Export "Asset-Download".
+            if not any(self._asset_matches(aval.get("href", ""), ak, exts, terms)
+                       and self._is_checked(f"asset::{iid}::{ak}")
+                       for ak, aval in item.get("assets", {}).items()):
                 continue
-            asset_entries.sort(key=lambda e: e[0])
             info = " ".join(v for v in (year, area) if v)
-            lines = [
+            blocks.append("\n".join([
                 f"info: {info}",
                 f"item: {display};",
                 f"- {browser_url(env, iid, include_lang=False)}",
-                "asset: ",
-            ]
-            for ak, href in asset_entries:
-                lines.append(ak)
-                lines.append(f"- {href}")
-            blocks.append("\n".join(lines))
+            ]))
 
         if not blocks:
             messagebox.showwarning("Keine Auswahl", "Keine ausgewählten Assets nach Filter.")
@@ -2140,6 +2185,59 @@ class StacMonitorApp(tk.Tk):
             initialfile=f"item_STAC-Browser-Links_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.txt",
             filetypes=[("Textdatei", "*.txt"), ("Alle Dateien", "*.*")],
             defaultextension=".txt", on_saved=_on_saved,
+        )
+
+    def _export_stac_json(self):
+        """Exportiert die ausgewählten Items/Assets als valide STAC-1.0.0-
+        ItemCollection (GeoJSON FeatureCollection) – dasselbe Format, das auch
+        die STAC-API unter /items bzw. /search liefert. Die Assets werden auf
+        die per Filter und Checkbox getroffene Auswahl reduziert; build_stac_item
+        ergänzt die nötige stac_extensions-Deklaration (siehe api/stac_api.py).
+
+        Anders als "Asset-Download" (reine Href-Liste) ist das Ergebnis
+        ein maschinenlesbarer STAC-Katalogauszug, z.B. für pystac, GDAL/OGR
+        (STACIT-Treiber) oder QGIS.
+        """
+        if not self._visible_items:
+            messagebox.showwarning("Keine Daten", "Keine Items geladen.")
+            return
+
+        exts        = self._active_extensions()
+        terms       = self._active_terms()
+        items_out   = []
+        asset_count = 0
+        for item in self._visible_items:
+            iid    = item["id"]
+            assets_out: Dict = {}
+            for ak, aval in item.get("assets", {}).items():
+                href = aval.get("href", "")
+                if not self._asset_matches(href, ak, exts, terms):
+                    continue
+                if not self._is_checked(f"asset::{iid}::{ak}"):
+                    continue
+                assets_out[ak] = aval
+            if not assets_out:
+                continue
+            items_out.append(build_stac_item(item, assets_out))
+            asset_count += len(assets_out)
+
+        if not items_out:
+            messagebox.showwarning("Keine Auswahl", "Keine ausgewählten Assets nach Filter.")
+            return
+
+        content = json.dumps({"type": "FeatureCollection", "features": items_out},
+                             indent=2, ensure_ascii=False)
+
+        def _on_saved(path):
+            self._log_write(f"[Export] STAC JSON: {path}\n")
+            messagebox.showinfo("Export erfolgreich",
+                                f"{len(items_out)} Item(s)  |  {asset_count} Asset(s)\n{path}")
+
+        ExportPreviewDialog(
+            self, self._dark, "Item - STAC JSON exportieren", content,
+            initialfile=f"item_STAC_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.json",
+            filetypes=[("JSON", "*.json"), ("Alle Dateien", "*.*")],
+            defaultextension=".json", on_saved=_on_saved,
         )
 
     _LARGE_ASSET_HINT = (
@@ -2164,6 +2262,7 @@ class StacMonitorApp(tk.Tk):
             messagebox.showwarning("Keine Daten", "Keine Items geladen.")
             return
 
+        env   = self._env_var.get()
         exts  = self._active_extensions()
         terms = self._active_terms()
         _pfx  = COLLECTION_ID + "_"
@@ -2188,7 +2287,14 @@ class StacMonitorApp(tk.Tk):
                 continue
             asset_entries.sort(key=lambda e: e[0])
             info = " ".join(v for v in (year, area) if v)
-            lines = [f"info: {info}", f"item: {display};", "asset: "]
+            lines = [
+                f"info: {info}",
+                # Item-Zeile trägt zusätzlich den STAC-Browser-Link, damit der
+                # Kunde neben den reinen Download-Hrefs auch die Metadaten-
+                # Ansicht des Items erreicht.
+                f"item: {display}; {browser_url(env, iid, include_lang=False)}",
+                "asset: ",
+            ]
             for ak, href in asset_entries:
                 lines.append(ak)
                 lines.append(f"- {href}")
