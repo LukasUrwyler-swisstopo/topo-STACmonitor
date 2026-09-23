@@ -998,7 +998,7 @@ class StacMonitorApp(tk.Tk):
                 self.after(50, lambda: self._gdwh_show_pending_notice(pending_count))
         except Exception as exc:
             self._log_write(f"[GDWH FEHLER] {exc}\n")
-            self.after(0, lambda: messagebox.showerror("GDWH Fehler", str(exc)))
+            self.after(0, lambda msg=str(exc): messagebox.showerror("GDWH Fehler", msg))
         finally:
             self.after(0, lambda: self._gdwh_load_btn.config(state="normal"))
 
@@ -1447,7 +1447,7 @@ class StacMonitorApp(tk.Tk):
             self.after(0, self._apply_filters)
         except Exception as exc:
             self._log_write(f"[FEHLER] {exc}\n")
-            self.after(0, lambda: messagebox.showerror("Fehler", str(exc)))
+            self.after(0, lambda msg=str(exc): messagebox.showerror("Fehler", msg))
         finally:
             self.after(0, lambda: self._set_busy(False))
 
@@ -2038,18 +2038,10 @@ class StacMonitorApp(tk.Tk):
                 elif sc is not None:
                     err_cnt += 1
 
-                nid = f"asset::{iid}::{ak}"
-                cur_sel  = self._chk_glyph(nid)
-                cur_typ  = ""
-                cur_area = ""
-                if self._tree.exists(nid):
-                    cur_vals = self._tree.item(nid, "values")
-                    cur_area, cur_typ = cur_vals[1], cur_vals[3]
-
-                self.after(0, lambda n=nid, sel=cur_sel, s=stxt, t=cur_typ, ar=cur_area,
+                # Treeview nur im GUI-Thread anfassen (Tk ist nicht thread-safe)
+                self.after(0, lambda n=f"asset::{iid}::{ak}", s=stxt,
                            sz_=_fmt_size(sz), lm_=_fmt_date(lm), tag=tg:
-                           self._tree.exists(n) and
-                           self._tree.item(n, values=(sel, ar, s, t, sz_, lm_), tags=(tag,)))
+                           self._update_checked_asset_row(n, s, sz_, lm_, tag))
 
                 if sc not in (200, -4):
                     self._log_write(f"  {ak}  →  {stxt}  {_fmt_size(sz)}\n")
@@ -2062,6 +2054,16 @@ class StacMonitorApp(tk.Tk):
         self.after(0, lambda: self._check_btn.config(state="normal", style="Green.TButton"))
         self.after(0, self._enable_error_filter_btn)
         self.after(0, lambda: self._refresh_stats(ok_cnt, err_cnt, tot_sz))
+
+    def _update_checked_asset_row(self, nid: str, stxt: str, sz_txt: str,
+                                  lm_txt: str, tag: str):
+        """Schreibt das Prüfergebnis in die Asset-Zeile. Die Zeile kann während
+        der Prüfung durch Filter/Neuaufbau des Baums verschwunden sein."""
+        if not self._tree.exists(nid):
+            return
+        cur = self._tree.item(nid, "values")
+        self._tree.item(nid, values=(self._chk_glyph(nid), cur[1], stxt, cur[3],
+                                     sz_txt, lm_txt), tags=(tag,))
 
     def _enable_error_filter_btn(self):
         self._assets_checked_once = True
