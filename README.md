@@ -18,7 +18,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 2. Tool starten: WIN-Taste + cmd (Terminal starten):
 
    ```bash
-   python pfad/topo-STACmonitor.py
+   python pfad/GUI_STACmonitor.py
    ```
 <img width="959" height="730" alt="image" src="https://github.com/user-attachments/assets/1084f67c-6369-4ae7-80c4-af4de32eec99" />
 
@@ -143,7 +143,7 @@ und verbindet sich direkt, ohne Proxy.
 
 | Datei | Zweck |
 |---|---|
-| `topo-STACmonitor.py` | GUI-Anwendung (Tkinter) |
+| `GUI_STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
 | `api/gdwh_api.py` | GDWH-API-Hilfsfunktionen (read-only) |
 | `test/test_functions.py` | Unit-Tests (pytest) |

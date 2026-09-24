@@ -1,5 +1,5 @@
 """
-topo-STACmonitor.py  –  STAC Monitoring-Tool (read-only)
+GUI_STACmonitor.py  –  STAC Monitoring-Tool (read-only)
 
 Zeigt Items und Assets der Collection "ch.swisstopo.spezialbefliegungen"
 in einer Baumansicht. Funktionen:

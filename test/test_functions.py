@@ -1,6 +1,6 @@
 """
 test_functions.py  –  Unit-Tests für die reinen Hilfsfunktionen von
-api/stac_api.py und topo-STACmonitor.py (kein Netzwerk-/GUI-Zugriff).
+api/stac_api.py und GUI_STACmonitor.py (kein Netzwerk-/GUI-Zugriff).
 
 Aufruf:  pytest test/test_functions.py
 """
@@ -19,7 +19,7 @@ from api import gdwh_api as gapi
 from api import stac_api as api
 
 # Laden über importlib anhand des Dateipfads (liegt ausserhalb des Package-Baums).
-_gui_path = _PROJECT_ROOT / "topo-STACmonitor.py"
+_gui_path = _PROJECT_ROOT / "GUI_STACmonitor.py"
 _spec = importlib.util.spec_from_file_location("gui_stac_monitor", _gui_path)
 gui = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gui)
