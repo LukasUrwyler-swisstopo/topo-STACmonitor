@@ -242,8 +242,8 @@ EXT_PRESETS: List[Tuple[str, List[str]]] = [
     ("tif / tiff",      [".tif", ".tiff"]),
     ("copc.laz / laz",  [".copc.laz", ".laz"]),
     ("jpg / jpeg",      [".jpg", ".jpeg"]),
-    ("png",             [".png"]),
-    ("json",            [".json"]),
+    ("kml",             [".kml"]),
+    ("txt",             [".txt"]),
 ]
 
 

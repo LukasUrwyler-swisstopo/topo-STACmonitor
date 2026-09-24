@@ -1,5 +1,5 @@
 """
-GUI_monitoring_stac_gdwh.py  –  STAC Monitoring-Tool (read-only)
+topo-STACmonitor.py  –  STAC Monitoring-Tool (read-only)
 
 Zeigt Items und Assets der Collection "ch.swisstopo.spezialbefliegungen"
 in einer Baumansicht. Funktionen:
@@ -583,21 +583,27 @@ class StacMonitorApp(tk.Tk):
         # feuert sonst erst bei einem tatsächlichen Klick, nicht bei der Vorauswahl).
         self._on_auftragstyp_change()
 
+        # Asset-Key (analog topo-STACdelete)
+        self._optional_label(sec, "Asset-Key [optional]:").grid(
+            row=3, column=0, sticky="w", pady=(6, 0))
+        self._asset_filter_var = tk.StringVar()
+        self._asset_filter_var.trace_add("write", lambda *_: self._apply_filters())
+        ttk.Entry(sec, textvariable=self._asset_filter_var, width=34).grid(
+            row=3, column=1, columnspan=2, sticky="w", pady=(6, 0))
+        ttk.Label(sec, text='Teilstring im Key oder Dateinamen, z.B. "nrgb" oder "16bit"',
+                  font=("Segoe UI", 8), style="Dim.TLabel").grid(
+            row=3, column=3, sticky="w", padx=(8, 0), pady=(6, 0))
+
         # Dateiendung
-        ttk.Label(sec, text="Dateiendung:").grid(row=3, column=0, sticky="w", pady=(6, 0))
+        ttk.Label(sec, text="Dateiendung:").grid(row=4, column=0, sticky="w", pady=(6, 0))
         ext_frame = ttk.Frame(sec)
-        ext_frame.grid(row=3, column=1, columnspan=4, sticky="w", pady=(6, 0))
+        ext_frame.grid(row=4, column=1, columnspan=4, sticky="w", pady=(6, 0))
         self._ext_vars: List[Tuple[tk.BooleanVar, List[str]]] = []
         for label, exts in EXT_PRESETS:
             var = tk.BooleanVar(value=False)
             var.trace_add("write", lambda *_: self._apply_filters())
             self._ext_vars.append((var, exts))
             ttk.Checkbutton(ext_frame, text=label, variable=var).pack(side="left", padx=(0, 10))
-        self._optional_label(ext_frame, "Freitext im Dateinamen [optional]:").pack(
-            side="left", padx=(6, 4))
-        self._ext_custom_var = tk.StringVar()
-        self._ext_custom_var.trace_add("write", lambda *_: self._apply_filters())
-        ttk.Entry(ext_frame, textvariable=self._ext_custom_var, width=14).pack(side="left")
 
     def _build_stac_functions(self, parent):
         # Kompaktes 2-zeiliges Toolbar-Layout statt einer eigenen Zeile pro
@@ -1536,7 +1542,8 @@ class StacMonitorApp(tk.Tk):
         return result
 
     def _active_terms(self) -> List[str]:
-        return [p.lower() for p in self._ext_custom_var.get().replace(",", " ").split()]
+        term = self._asset_filter_var.get().strip().lower()
+        return [term] if term else []
 
     @staticmethod
     def _asset_matches(href: str, key: str, exts: List[str], terms: List[str]) -> bool:
@@ -1544,7 +1551,10 @@ class StacMonitorApp(tk.Tk):
         key_l  = key.lower()
         if exts and not any(href_l.endswith(e) or key_l.endswith(e) for e in exts):
             return False
-        if terms and not any(t in href_l or t in key_l for t in terms):
+        # Asset-Key-Filter: Treffer im Key oder im Dateinamen (nicht im ganzen
+        # href-Pfad, sonst matcht z.B. die Collection-ID in jeder URL)
+        fname_l = href_l.rsplit("/", 1)[-1]
+        if terms and not any(t in key_l or t in fname_l for t in terms):
             return False
         return True
 

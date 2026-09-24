@@ -18,7 +18,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 2. Tool starten: WIN-Taste + cmd (Terminal starten):
 
    ```bash
-   python pfad/GUI_monitoring_stac_gdwh.py
+   python pfad/topo-STACmonitor.py
    ```
 <img width="959" height="730" alt="image" src="https://github.com/user-attachments/assets/1084f67c-6369-4ae7-80c4-af4de32eec99" />
 
@@ -27,7 +27,8 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 ### Tab STAC
 
 3. Im GUI oben: **Umgebung** (INT/PROD) wählen und **Credentials laden**
-4. Optional Filter setzen (Auftragstyp, Jahr, Suchbegriff, Dateiendung),
+4. Optional Filter setzen (Auftragstyp, Jahr, Area, Item-ID, Asset-Key,
+   Dateiendung tif/laz/jpg/kml/txt),
    dann **Laden** klicken
 5. In der Baumansicht die gewünschten Items/Assets per Checkbox auswählen
    (oder **Alle auswählen**)
@@ -65,7 +66,9 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 ## Funktionen
 
 - **Items laden & filtern** – ganze Collection oder gezielt per Item-ID;
-  Filter nach Auftragstyp, Jahr, Suchbegriff, Dateiendung
+  Filter nach Auftragstyp, Jahr, Area, Item-ID, Asset-Key (Teilstring im
+  Key oder Dateinamen, z.B. `nrgb`, `16bit`) und Dateiendung
+  (tif, copc.laz/laz, jpg, kml, txt)
 - **Auswahl per Checkbox** – einzelne Assets oder ganze Items, inkl.
   "Alle auswählen" / "Alles abwählen"
 - **Assets prüfen (HEAD)** – prüft Status, Dateigrösse und Änderungsdatum
@@ -140,7 +143,7 @@ und verbindet sich direkt, ohne Proxy.
 
 | Datei | Zweck |
 |---|---|
-| `GUI_monitoring_stac_gdwh.py` | GUI-Anwendung (Tkinter) |
+| `topo-STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
 | `api/gdwh_api.py` | GDWH-API-Hilfsfunktionen (read-only) |
 | `test/test_functions.py` | Unit-Tests (pytest) |

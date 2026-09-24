@@ -1,6 +1,6 @@
 """
 test_functions.py  –  Unit-Tests für die reinen Hilfsfunktionen von
-api/stac_api.py und GUI_monitoring_stac_gdwh.py (kein Netzwerk-/GUI-Zugriff).
+api/stac_api.py und topo-STACmonitor.py (kein Netzwerk-/GUI-Zugriff).
 
 Aufruf:  pytest test/test_functions.py
 """
@@ -19,7 +19,7 @@ from api import gdwh_api as gapi
 from api import stac_api as api
 
 # Laden über importlib anhand des Dateipfads (liegt ausserhalb des Package-Baums).
-_gui_path = _PROJECT_ROOT / "GUI_monitoring_stac_gdwh.py"
+_gui_path = _PROJECT_ROOT / "topo-STACmonitor.py"
 _spec = importlib.util.spec_from_file_location("gui_stac_monitor", _gui_path)
 gui = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(gui)
@@ -323,6 +323,20 @@ class _AppStub:
 
     def _active_terms(self):
         return []
+
+
+def test_asset_matches_key_filter_on_key_or_filename():
+    match = gui.StacMonitorApp._asset_matches
+    href = "https://data.geo.admin.ch/ch.swisstopo.spezialbefliegungen/it1/ortho_nrgb_16bit.tif"
+    assert match(href, "ortho.tif", [], ["16bit"])           # Treffer im Dateinamen
+    assert match(href, "nrgb_ortho.tif", [], ["nrgb"])       # Treffer im Key
+    assert not match(href, "ortho.tif", [], ["rgbi"])
+
+
+def test_asset_matches_key_filter_ignores_url_path():
+    # Collection-ID steht in jeder URL, darf aber nicht als Treffer zählen.
+    href = "https://data.geo.admin.ch/ch.swisstopo.spezialbefliegungen/it1/a.tif"
+    assert not gui.StacMonitorApp._asset_matches(href, "a.tif", [], ["spezialbefliegungen"])
 
 
 def _btn_style(**kwargs) -> str:
