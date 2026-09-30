@@ -361,6 +361,7 @@ class StacMonitorApp(tk.Tk):
     _SHOW_FAULTY_BTN_LABEL   = "Fehlerhafte anzeigen"
     _SHOW_NO_THUMB_BTN_LABEL = "ITEMs ohne Thumbnail"
     _SHOW_ONLY_THUMB_BTN_LABEL = "ITEMs only with Thumbnail"
+    _SHOW_NO_DESC_BTN_LABEL    = "Assets ohne Description"
     _SHOW_ALL_BTN_LABEL      = "Alle Assets wieder anzeigen"
 
     _SELECT_ALL_BTN_LABEL   = "Alles auswählen"
@@ -415,6 +416,9 @@ class StacMonitorApp(tk.Tk):
         # Toggle für "ITEMs only with Thumbnail" (Items mit genau 1 Asset,
         # das ein Thumbnail ist – analog zum STAC/GDWH Deleting-Tool)
         self._show_only_thumb: bool = False
+        # Toggle für "Assets ohne Description" – Zulieferung für
+        # topo-STACassetEditor (reine href-Liste via "Asset-Download")
+        self._show_no_desc: bool = False
 
         # Lade-Spinner im "ITEM-Liste laden"-Button
         self._spinner_job: Optional[str] = None
@@ -663,6 +667,11 @@ class StacMonitorApp(tk.Tk):
             row1, text=self._SHOW_ONLY_THUMB_BTN_LABEL,
             command=self._toggle_only_thumb_filter, state="disabled")
         self._show_only_thumb_btn.pack(side="left", padx=(4, 0))
+
+        self._show_no_desc_btn = ttk.Button(
+            row1, text=self._SHOW_NO_DESC_BTN_LABEL,
+            command=self._toggle_no_desc_filter, state="disabled")
+        self._show_no_desc_btn.pack(side="left", padx=(4, 0))
 
         # ── Zeile 2: Export Links | direkter Download | ASSET Viewer ────────
         row2 = _group(bar_bottom, "Export Links")
@@ -1427,6 +1436,9 @@ class StacMonitorApp(tk.Tk):
         self._show_only_thumb = False
         self._show_only_thumb_btn.config(
             text=self._SHOW_ONLY_THUMB_BTN_LABEL, style="TButton")
+        self._show_no_desc = False
+        self._show_no_desc_btn.config(
+            text=self._SHOW_NO_DESC_BTN_LABEL, style="TButton")
         self._check_btn.config(style="TButton")
         self._populate_tree([], [], [], False)  # Bestehende Liste sofort leeren, bevor neu geladen wird
         self._set_busy(True)
@@ -1646,6 +1658,30 @@ class StacMonitorApp(tk.Tk):
         self._refresh_select_toggle_btn()
         self._apply_filters()
 
+    @staticmethod
+    def _asset_lacks_description(ak: str, aval: Dict) -> bool:
+        """True, wenn das Asset keine (bzw. eine leere) 'description' hat.
+        Fehlender Key, None und reine Leerzeichen gelten als leer.
+        Thumbnails sind ausgenommen – sie brauchen keine Description und
+        sollen nicht in die href-Liste für topo-STACassetEditor."""
+        if is_thumbnail_asset(ak) or is_thumbnail_asset(aval.get("href", "")):
+            return False
+        return not str(aval.get("description") or "").strip()
+
+    def _toggle_no_desc_filter(self):
+        """Blendet die Baumansicht auf Assets OHNE (bzw. mit leerer)
+        'description' ein/aus. Kombiniert sich mit den übrigen Filtern.
+        Solange aktiv, exportiert 'Asset-Download' eine reine href-Liste
+        (Eingabe für topo-STACassetEditor)."""
+        self._show_no_desc = not self._show_no_desc
+        self._show_no_desc_btn.config(
+            text=self._SHOW_ALL_BTN_LABEL if self._show_no_desc
+                 else self._SHOW_NO_DESC_BTN_LABEL,
+            style="Amber.TButton" if self._show_no_desc else "TButton")
+        self._checked.clear()
+        self._refresh_select_toggle_btn()
+        self._apply_filters()
+
     def _toggle_no_thumb_filter(self):
         """Blendet die Baumansicht auf Items OHNE Thumbnail-Asset ein/aus
         (nur bei Auftragstyp RAM verfügbar). Kombiniert sich mit den übrigen
@@ -1669,6 +1705,7 @@ class StacMonitorApp(tk.Tk):
         exts        = self._active_extensions()
         terms       = self._active_terms()
         errors_only = self._error_filter_var.get()
+        no_desc     = self._show_no_desc
 
         items = self._all_items
         if search:
@@ -1677,13 +1714,15 @@ class StacMonitorApp(tk.Tk):
             items = [it for it in items if stac_item_year(it) == year]
         if area:
             items = [it for it in items if area.lower() in stac_item_area(it).lower()]
-        if exts or terms or errors_only:
+        if exts or terms or errors_only or no_desc:
             def _has_match(it):
                 iid = it["id"]
                 for k, v in it.get("assets", {}).items():
                     if not self._asset_matches(v.get("href", ""), k, exts, terms):
                         continue
                     if errors_only and not self._asset_is_error(iid, k):
+                        continue
+                    if no_desc and not self._asset_lacks_description(k, v):
                         continue
                     return True
                 return False
@@ -1722,11 +1761,12 @@ class StacMonitorApp(tk.Tk):
             display = iid[len(_pfx):] if iid.startswith(_pfx) else iid
 
             assets = item.get("assets", {})
-            if exts or terms or errors_only:
+            if exts or terms or errors_only or self._show_no_desc:
                 asset_keys = [
                     k for k, v in assets.items()
                     if self._asset_matches(v.get("href", ""), k, exts, terms)
                     and (not errors_only or self._asset_is_error(iid, k))
+                    and (not self._show_no_desc or self._asset_lacks_description(k, v))
                 ]
             else:
                 asset_keys = list(assets.keys())
@@ -1805,6 +1845,7 @@ class StacMonitorApp(tk.Tk):
         # einer HEAD-Prüfung nutzbar.
         self._show_no_thumb_btn.config(state="normal" if has_data else "disabled")
         self._show_only_thumb_btn.config(state="normal" if has_data else "disabled")
+        self._show_no_desc_btn.config(state="normal" if has_data else "disabled")
 
     def _expand_all(self):
         for node in self._tree.get_children():
@@ -2273,6 +2314,9 @@ class StacMonitorApp(tk.Tk):
         if not self._visible_items:
             messagebox.showwarning("Keine Daten", "Keine Items geladen.")
             return
+        if self._show_no_desc:
+            self._create_href_list_no_desc()
+            return
 
         env   = self._env_var.get()
         exts  = self._active_extensions()
@@ -2331,6 +2375,48 @@ class StacMonitorApp(tk.Tk):
         ExportPreviewDialog(
             self, self._dark, "Download-Links exportieren", content,
             initialfile=f"download_links_{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.txt",
+            filetypes=[("Textdatei", "*.txt"), ("Alle Dateien", "*.*")],
+            defaultextension=".txt", on_saved=_on_saved,
+        )
+
+    def _create_href_list_no_desc(self):
+        """Reine href-Liste (eine URL pro Zeile, ohne weiteren Text) der
+        ausgewählten Assets ohne Description – direkt lesbar von
+        topo-STACassetEditor ('Aus TXT-Datei laden…' / read_hrefs)."""
+        exts  = self._active_extensions()
+        terms = self._active_terms()
+        hrefs: List[str] = []
+        seen = set()
+        for item in sorted(self._visible_items, key=stac_item_acq_date, reverse=True):
+            iid = item["id"]
+            for ak, aval in sorted(item.get("assets", {}).items()):
+                href = aval.get("href", "")
+                if (not href
+                        or not self._asset_matches(href, ak, exts, terms)
+                        or not self._asset_lacks_description(ak, aval)
+                        or not self._is_checked(f"asset::{iid}::{ak}")
+                        or href in seen):
+                    continue
+                seen.add(href)
+                hrefs.append(href)
+
+        if not hrefs:
+            messagebox.showwarning("Keine Auswahl",
+                                   "Keine ausgewählten Assets ohne Description.")
+            return
+
+        content = "\n".join(hrefs) + "\n"
+        env = self._env_var.get()
+
+        def _on_saved(path):
+            self._log_write(f"[Export] href-Liste Assets ohne Description ({env}): {path}\n")
+            messagebox.showinfo("Export erfolgreich",
+                                f"{len(hrefs)} Asset-href(s) exportiert.\n{path}")
+
+        ExportPreviewDialog(
+            self, self._dark, "Asset-hrefs ohne Description exportieren", content,
+            initialfile=f"asset_hrefs_ohne_description_{env}_"
+                        f"{datetime.now().strftime('%Y-%m-%d_%H%M%S')}.txt",
             filetypes=[("Textdatei", "*.txt"), ("Alle Dateien", "*.*")],
             defaultextension=".txt", on_saved=_on_saved,
         )
