@@ -28,12 +28,18 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 3. Im GUI oben: **Umgebung** (INT/PROD) wählen und **Credentials laden**
 4. Optional Filter setzen (Auftragstyp, Jahr, Area, Item-ID, Asset-Key,
    Dateiendung tif/laz/jpg/kml/txt),
-   dann **Laden** klicken
+   dann **ITEM-Liste laden** klicken
 5. In der Baumansicht die gewünschten Items/Assets per Checkbox auswählen
-   (oder **Alle auswählen**)
-6. Im Bereich **STAC-Funktionen**: **Assets prüfen (HEAD)** für Status &
-   Grösse, danach je nach Bedarf herunterladen oder exportieren
-7. Asset **GUI-Viewer**: einzeln ausgewählte Assets (ausser 16bit und copc) direkt in map.geo.admin.ch anzeigen, wahlweise im Browser oder in einem angedockten Viewer-Fenster
+   (oder **Alles auswählen**)
+6. Im Bereich **STAC-Funktionen** (Details siehe
+   [STAC-Funktionen](#stac-funktionen-button-leiste-unter-der-baumansicht)):
+   - **Quality Check**: **Assets prüfen (HEAD)** für Status & Grösse,
+     danach optional filtern (**Fehlerhafte anzeigen**, **ITEMs ohne
+     Thumbnail**, **ITEMs only with Thumbnail**, **Assets ohne Description**)
+   - **Export Links**: **STAC-Browser**, **STAC-JSON** oder
+     **Asset-Download** (bzw. **Asset-href-Links**) als Datei exportieren
+   - **direkter Download**: **Download Assets** auf die eigene Festplatte
+7. **ASSET Viewer**: einzeln ausgewählte Assets (ausser 16bit und copc) direkt in map.geo.admin.ch anzeigen, wahlweise im Browser oder in einem angedockten Viewer-Fenster
 
 ### Tab GDWH
 
@@ -64,22 +70,38 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ## Funktionen
 
+### Tab STAC – Laden & Auswahl
+
 - **Items laden & filtern** – ganze Collection oder gezielt per Item-ID;
   Filter nach Auftragstyp, Jahr, Area, Item-ID, Asset-Key (Teilstring im
   Key oder Dateinamen, z.B. `nrgb`, `16bit`) und Dateiendung
   (tif, copc.laz/laz, jpg, kml, txt)
 - **Auswahl per Checkbox** – einzelne Assets oder ganze Items, inkl.
-  "Alle auswählen" / "Alles abwählen"
-- **Assets prüfen (HEAD)** – prüft Status, Dateigrösse und Änderungsdatum
-  der ausgewählten Assets. Assets über 50 GB (von CloudFront normalerweise
-  mit Fehler 400 gemeldet) werden korrekt als ✓ **>50GB** statt als Fehler
-  erkannt
-- **Fehlerhafte anzeigen** / **ITEMs ohne Thumbnail** / **ITEMs only with
-  Thumbnail** – blenden die Baumansicht gezielt auf problematische bzw.
-  unvollständige Items ein, bzw. auf Items, die nur aus einem Thumbnail
-  ohne echte Nutzdaten bestehen. **Fehlerhafte anzeigen** wird nach der
-  HEAD-Prüfung **rot**, falls es unter den aktuellen Filtereinstellungen
-  fehlerhafte Assets gibt – ohne Fehler bleibt die Schrift neutral
+  **Alles auswählen** / **Alles abwählen**
+
+### STAC-Funktionen (Button-Leiste unter der Baumansicht)
+
+- Gruppe **Quality Check**:
+  - **Assets prüfen (HEAD)** – prüft Status, Dateigrösse und
+    Änderungsdatum der ausgewählten Assets. Assets über 50 GB (von
+    CloudFront normalerweise mit Fehler 400 gemeldet) werden korrekt als
+    ✓ **>50GB** statt als Fehler erkannt
+  - **Fehlerhafte anzeigen** – blendet die Baumansicht auf Assets mit
+    Fehlerstatus ein. Wird nach der HEAD-Prüfung **rot**, falls es unter
+    den aktuellen Filtereinstellungen fehlerhafte Assets gibt – ohne Fehler
+    bleibt die Schrift neutral
+  - **ITEMs ohne Thumbnail** – nur bei Auftragstyp RAM sichtbar
+    (Thumbnail-Pflicht); zeigt Items ohne Thumbnail-Asset
+  - **ITEMs only with Thumbnail** – zeigt Items, die genau ein Asset
+    besitzen und dieses ein Thumbnail ist (also ohne echte Nutzdaten)
+  - **Assets ohne Description** – zeigt Assets ohne bzw. mit leerer
+    `description` (Thumbnails ausgenommen). Solange aktiv, wird der
+    Export-Button **Asset-Download** zu **Asset-href-Links** (siehe unten)
+
+  Alle Filter-Buttons sind Toggles: aktiv **amber** beschriftet mit **Alle
+  Assets wieder anzeigen**, ein zweiter Klick hebt den Filter auf. Sie
+  lassen sich untereinander und mit den Filtern oben kombinieren; beim
+  Umschalten wird die Auswahl zurückgesetzt
 - Gruppe **Export Links** – erzeugt Textdateien zur Auswahl, jeweils mit
   Vorschau vor dem Speichern:
   - **STAC-Browser** – ausschliesslich die STAC-Browser-Links der Items
@@ -99,9 +121,13 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
   Assets direkt auf die eigene Festplatte (ein Unterordner pro Item). Assets
   über 50 GB werden automatisch in Teilstücken heruntergeladen, da sie sonst
   am CloudFront-Limit scheitern würden
-- **Kartenviewer** – ausgewählte GeoTIFFs bzw. Tagesübersichten direkt in
-  map.geo.admin.ch anzeigen, wahlweise im Browser oder in einem
-  angedockten Viewer-Fenster
+- Gruppe **ASSET Viewer** – ausgewählte GeoTIFFs bzw. Tagesübersichten
+  direkt in map.geo.admin.ch anzeigen:
+  - **Link auf Kartenviewer** – öffnet die Ansicht im Browser
+  - **GUI Viewer öffnen** – öffnet sie in einem angedockten Viewer-Fenster
+
+### Weitere Funktionen
+
 - Statistik (OK/Fehler/Gesamtgrösse), Item-JSON-Detailansicht,
   Hell/Dark-Theme
 - **Tab GDWH** – Liste der DataPackages je GDS-Key (einzeln oder für alle
