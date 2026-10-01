@@ -629,7 +629,7 @@ class StacMonitorApp(tk.Tk):
             grp = ttk.Frame(bar)
             grp.pack(side="left", anchor="n", padx=(0, 10))
             ttk.Label(grp, text=caption, font=_hdr_font,
-                      style="Dim.TLabel").pack(side="top", anchor="w")
+                      style="Accent.TLabel").pack(side="top", anchor="w")
             row = ttk.Frame(grp)
             row.pack(side="top", anchor="w", pady=(1, 0))
             return row
@@ -1212,6 +1212,7 @@ class StacMonitorApp(tk.Tk):
             background=T["panel"], foreground=T["accent"], font=("Segoe UI", 10, "bold"))
         s.configure("TLabel",    background=T["panel"], foreground=T["fg"])
         s.configure("Dim.TLabel", background=T["panel"], foreground=T["fg_dim"])
+        s.configure("Accent.TLabel", background=T["panel"], foreground=T["accent"])
         s.configure("TButton",
             background=T["btn"], foreground=T["fg"],
             bordercolor=T["sep"], relief="flat", padding=(8, 4), focuscolor=T["panel"])
