@@ -86,13 +86,16 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
   - **STAC-Browser** – ausschliesslich die STAC-Browser-Links der Items
     (TXT), inkl. Jahr und Area als Info-Zeile. Bewusst ohne Asset-Links;
     die Item-Auswahl ist dieselbe wie bei **Asset-Download**
-  - **STAC-Item** – die Auswahl als valide STAC-1.0.0-ItemCollection
+  - **STAC-JSON** – die Auswahl als valide STAC-1.0.0-ItemCollection
     (GeoJSON FeatureCollection), also maschinenlesbar für pystac, GDAL/OGR
     (STACIT) oder QGIS – inkl. der von der API nicht mitgelieferten
     `stac_extensions`-Deklaration
   - **Asset-Download** – Download-Links der Auswahl zum Weitergeben an
     Kunden, je Item zusätzlich der STAC-Browser-Link auf der `item`-Zeile;
-    bei Assets über 50 GB inkl. Hinweis auf die nötige Download-Methode
+    bei Assets über 50 GB inkl. Hinweis auf die nötige Download-Methode.
+    Bei aktivem **Assets ohne Description** heisst der Button
+    **Asset-href-Links** und exportiert eine reine href-Liste (Eingabe für
+    topo-STACassetEditor); er wird **grün**, sobald Assets gelistet sind
 - Gruppe **direkter Download** → **Download Assets** – lädt die ausgewählten
   Assets direkt auf die eigene Festplatte (ein Unterordner pro Item). Assets
   über 50 GB werden automatisch in Teilstücken heruntergeladen, da sie sonst

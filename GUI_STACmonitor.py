@@ -7,7 +7,7 @@ in einer Baumansicht. Funktionen:
   - Statistik: OK / Fehler / Gesamtgrösse
   - Item-JSON Detailansicht (Doppelklick oder Rechtsklick)
   - URL in Zwischenablage kopieren, im Browser öffnen
-  - Export der Auswahl als STAC-1.0.0-ItemCollection (Button "STAC-Item")
+  - Export der Auswahl als STAC-1.0.0-ItemCollection (Button "STAC-JSON")
 
 Credentials: secrets/stac_credentials.json
 Format:      {"INT": {"username": "...", "password": "..."}, "PROD": {...}}
@@ -363,6 +363,8 @@ class StacMonitorApp(tk.Tk):
     _SHOW_ONLY_THUMB_BTN_LABEL = "ITEMs only with Thumbnail"
     _SHOW_NO_DESC_BTN_LABEL    = "Assets ohne Description"
     _SHOW_ALL_BTN_LABEL      = "Alle Assets wieder anzeigen"
+    _ASSET_DOWNLOAD_BTN_LABEL = "Asset-Download"
+    _HREF_LINKS_BTN_LABEL     = "Asset-href-Links"
 
     _SELECT_ALL_BTN_LABEL   = "Alles auswählen"
     _DESELECT_ALL_BTN_LABEL = "Alles abwählen"
@@ -549,7 +551,9 @@ class StacMonitorApp(tk.Tk):
 
         # Auftragstyp
         ttk.Label(sec, text="Auftragstyp:").grid(row=0, column=0, sticky="w", padx=(0, 6))
-        self._auftragstyp_var = tk.StringVar(value=list(AUFTRAGSTYPEN.keys())[0])
+        # Default "Alle" (leeres Suchpräfix) – sonst erster Eintrag als Fallback.
+        default_typ = "Alle" if "Alle" in AUFTRAGSTYPEN else next(iter(AUFTRAGSTYPEN))
+        self._auftragstyp_var = tk.StringVar(value=default_typ)
         col = 1
         for typ in AUFTRAGSTYPEN:
             ttk.Radiobutton(sec, text=typ, variable=self._auftragstyp_var, value=typ,
@@ -682,12 +686,12 @@ class StacMonitorApp(tk.Tk):
         self._export_links_btn.pack(side="left", padx=(0, 4))
 
         self._export_stac_btn = ttk.Button(
-            row2, text="STAC-Item",
+            row2, text="STAC-JSON",
             command=self._export_stac_json, state="disabled")
         self._export_stac_btn.pack(side="left", padx=(0, 4))
 
         self._create_links_btn = ttk.Button(
-            row2, text="Asset-Download",
+            row2, text=self._ASSET_DOWNLOAD_BTN_LABEL,
             command=self._create_download_links, state="disabled")
         self._create_links_btn.pack(side="left")
 
@@ -1672,8 +1676,8 @@ class StacMonitorApp(tk.Tk):
     def _toggle_no_desc_filter(self):
         """Blendet die Baumansicht auf Assets OHNE (bzw. mit leerer)
         'description' ein/aus. Kombiniert sich mit den übrigen Filtern.
-        Solange aktiv, exportiert 'Asset-Download' eine reine href-Liste
-        (Eingabe für topo-STACassetEditor)."""
+        Solange aktiv, heisst der Export-Button 'Asset-href-Links' und
+        exportiert eine reine href-Liste (Eingabe für topo-STACassetEditor)."""
         self._show_no_desc = not self._show_no_desc
         self._show_no_desc_btn.config(
             text=self._SHOW_ALL_BTN_LABEL if self._show_no_desc
@@ -1749,6 +1753,7 @@ class StacMonitorApp(tk.Tk):
         if not items:
             self._stats_lbl.configure(text="Keine Items nach aktuellem Filter.")
             self._toggle_tree_buttons(False)
+            self._refresh_create_links_btn(has_assets=False)
             return
 
         sorted_items = sorted(items, key=stac_item_acq_date, reverse=True)
@@ -1821,6 +1826,20 @@ class StacMonitorApp(tk.Tk):
         self._all_expanded = True
         self._refresh_expand_toggle_btn()
         self._toggle_tree_buttons(True)
+        self._refresh_create_links_btn(has_assets=total_assets > 0)
+
+    def _refresh_create_links_btn(self, has_assets: bool):
+        """Beschriftung + Farbe des Export-Buttons an den Modus anpassen:
+        Bei aktivem 'Assets ohne Description' exportiert er eine reine
+        href-Liste ('Asset-href-Links') – grün, sobald Assets gelistet sind,
+        sonst Standardfarbe. Ohne diesen Filter: 'Asset-Download', neutral."""
+        if self._show_no_desc:
+            self._create_links_btn.config(
+                text=self._HREF_LINKS_BTN_LABEL,
+                style="Green.TButton" if has_assets else "TButton")
+        else:
+            self._create_links_btn.config(
+                text=self._ASSET_DOWNLOAD_BTN_LABEL, style="TButton")
 
     def _toggle_tree_buttons(self, on: bool):
         state = "normal" if on else "disabled"
@@ -1832,7 +1851,11 @@ class StacMonitorApp(tk.Tk):
         self._map_viewer_btn.config(state=state)
         self._viewer_win_btn.config(state=state)
         self._expand_toggle_btn.config(state=state)
-        self._select_toggle_btn.config(state=state)
+        # Auswahl-Toggle auch bei leerer Filteransicht klickbar lassen, solange
+        # (ausgeblendete) Assets ausgewählt sind – sonst liesse sich die
+        # Auswahl nur nach Zurückstellen der Filter abwählen.
+        self._select_toggle_btn.config(
+            state="normal" if (on or any(self._checked.values())) else "disabled")
         # Unabhängig von der aktuellen Filter-Trefferzahl klickbar halten,
         # sonst könnten sich diese Toggle-Buttons selbst aussperren, falls der
         # gefilterte Blick (z.B. "Fehlerhafte anzeigen") gerade leer ist –
@@ -1925,11 +1948,16 @@ class StacMonitorApp(tk.Tk):
                  else self._SELECT_ALL_BTN_LABEL,
             style="Amber.TButton" if any_checked else "TButton")
 
-    def _refresh_item_glyph(self, item_id: str):
+    def _refresh_item_glyph(self, item_id: str,
+                            asset_nids: Optional[List[str]] = None):
+        """asset_nids optional vorberechnet übergeben – bei Massen-Updates
+        sonst O(Items × Knoten) durch _item_asset_nids()."""
         item_nid = f"item::{item_id}"
         if not self._tree.exists(item_nid):
             return
-        glyph = self._item_check_glyph(self._item_asset_nids(item_id))
+        if asset_nids is None:
+            asset_nids = self._item_asset_nids(item_id)
+        glyph = self._item_check_glyph(asset_nids)
         vals  = list(self._tree.item(item_nid, "values"))
         vals[0] = glyph
         self._tree.item(item_nid, values=vals,
@@ -1982,23 +2010,52 @@ class StacMonitorApp(tk.Tk):
         self._refresh_select_toggle_btn()
 
     def _deselect_all(self):
+        """Master-Abwahl: verwirft die GESAMTE Auswahl – auch Assets, die durch
+        den aktuellen Filter (Extension, 'Fehlerhafte anzeigen', 'Assets ohne
+        Description' usw.) gerade ausgeblendet sind."""
+        def _clear_all():
+            # Nur tatsächlich ausgewählte UND sichtbare Zeilen neu zeichnen –
+            # ausgeblendete Auswahl wird einfach mit verworfen.
+            checked_visible = [nid for nid, on in self._checked.items()
+                               if on and nid in self._nodes]
+            self._checked.clear()
+            self._update_rows(checked_visible)
         self._run_blocking_with_spinner(
-            self._select_toggle_btn, "Wähle ab …", lambda: self._set_all_checked(False))
+            self._select_toggle_btn, "Wähle ab …", _clear_all)
         self._refresh_select_toggle_btn()
+        # Bei leerer Filteransicht wieder sperren (siehe _toggle_tree_buttons).
+        if not self._nodes:
+            self._select_toggle_btn.config(state="disabled")
 
     def _set_all_checked(self, state: bool):
-        for nid, d in self._nodes.items():
-            if d["kind"] != "asset":
-                continue
+        asset_nids = [nid for nid, d in self._nodes.items() if d["kind"] == "asset"]
+        for nid in asset_nids:
             self._checked[nid] = state
-            if self._tree.exists(nid):
-                vals = list(self._tree.item(nid, "values"))
-                vals[0] = self._chk_glyph(nid)
-                row_tag = self._asset_tag(state, self._asset_status_tag(nid))
-                self._tree.item(nid, values=vals, tags=(row_tag,))
+        self._update_rows(asset_nids)
+
+    def _update_rows(self, asset_nids: List[str]):
+        """Zeichnet die gegebenen Asset-Zeilen sowie ihre Items gemäss
+        _checked neu. Item→Assets-Zuordnung wird einmalig aufgebaut (O(n)),
+        statt pro Item alle Knoten zu durchsuchen (O(n²) – fror die GUI bei
+        grossen Collections für ~30 s ein)."""
+        affected_items = set()
+        for nid in asset_nids:
+            d = self._nodes.get(nid)
+            if not d or not self._tree.exists(nid):
+                continue
+            vals = list(self._tree.item(nid, "values"))
+            vals[0] = self._chk_glyph(nid)
+            row_tag = self._asset_tag(self._is_checked(nid), self._asset_status_tag(nid))
+            self._tree.item(nid, values=vals, tags=(row_tag,))
+            affected_items.add(d["item_id"])
+        if not affected_items:
+            return
+        item_assets: Dict[str, List[str]] = {}
         for nid, d in self._nodes.items():
-            if d["kind"] == "item":
-                self._refresh_item_glyph(d["item_id"])
+            if d["kind"] == "asset" and d["item_id"] in affected_items:
+                item_assets.setdefault(d["item_id"], []).append(nid)
+        for iid in affected_items:
+            self._refresh_item_glyph(iid, item_assets.get(iid, []))
 
     # ── HEAD-Prüfung ──────────────────────────────────────────────────────────
 

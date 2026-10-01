@@ -417,6 +417,7 @@ class _ExportAppStub(_AppStub):
 
     _env_var = property(lambda self: _FilterVarStub("PROD"))
     _dark = False
+    _show_no_desc = False  # Standard-Export, nicht die href-Liste
 
     def __init__(self, exts=()):
         super().__init__(asset_info={}, exts=exts, visible=_EXPORT_ITEMS)
