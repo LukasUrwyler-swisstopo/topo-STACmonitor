@@ -57,7 +57,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
    sowie das **Area**-Textfeld (optional; filtert als Teilstring-Suche,
    z.B. `ALETSCH` findet auch `ALETSCH_MOOSFLUE`; leer = alle Areas)
    filtern die bereits geladene Liste sofort weiter, ohne Neu-Laden. Mit
-   **Nur Fehlerhafte anzeigen** blendet die Liste auf die beiden ⚠-Status
+   **Nur Fehlerhafte anzeigen** blendet die Liste auf die beiden : warning :-Status
    ein, statt durch alle DataPackages scrollen zu müssen; ein zweiter
    Klick (**Alle DataPackages anzeigen**) hebt den Filter wieder auf. Alle
    Filter lassen sich kombinieren.
