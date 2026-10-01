@@ -47,9 +47,9 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
    einen Status sowie (rechts, nach Status) den GDS-Key des Imports:
    - **✓ OK** – FileMetadata-Match vorhanden, Area und StacItemDatetime
      gesetzt
-   - **:warning: unvollständig** – FileMetadata-Match vorhanden, aber Area oder
+   - **: warning : unvollständig** – FileMetadata-Match vorhanden, aber Area oder
      StacItemDatetime fehlt
-   - **:warning: Kein FileMetadata-Match** – zu diesem Import existiert kein
+   - **: warning : Kein FileMetadata-Match** – zu diesem Import existiert kein
      FileMetadata-Eintrag; deutet auf einen unsauberen GDWH-Zustand hin
      (z.B. eine frühere, unvollständige Löschung)
 
