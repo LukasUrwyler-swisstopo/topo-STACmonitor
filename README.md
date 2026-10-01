@@ -20,7 +20,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
    ```bash
    python pfad/GUI_STACmonitor.py
    ```
-<img width="959" height="730" alt="image" src="https://github.com/user-attachments/assets/1084f67c-6369-4ae7-80c4-af4de32eec99" />
+<img width="913" height="756" alt="image" src="https://github.com/user-attachments/assets/b488c58b-6467-4c78-97af-a9a55665ae35" />
 
 
 
