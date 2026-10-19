@@ -478,6 +478,19 @@ def test_browser_and_download_export_select_same_items(monkeypatch):
     assert _exported_item_ids(browser) == _exported_item_ids(download) == ["it-mit-laz"]
 
 
+def test_text_exports_sort_items_newest_first(monkeypatch):
+    # Eingabe bewusst aufsteigend (wie von der API geliefert) – beide
+    # TXT-Exporte müssen das neueste Item zuoberst ausgeben.
+    monkeypatch.setattr(_ExportAppStub, "__init__",
+                        lambda self, exts=(): _AppStub.__init__(
+                            self, asset_info={}, exts=exts,
+                            visible=list(reversed(_EXPORT_ITEMS))))
+    for methode in (gui.StacMonitorApp._create_download_links,
+                    gui.StacMonitorApp._export_stac_browser_links):
+        content = _run_export(monkeypatch, methode)
+        assert _exported_item_ids(content) == ["it-mit-laz", "it-nur-tif"]
+
+
 def test_download_export_still_contains_asset_links(monkeypatch):
     # Gegenprobe: der Asset-Export darf die Hrefs nicht verloren haben.
     content = _run_export(monkeypatch, gui.StacMonitorApp._create_download_links)

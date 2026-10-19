@@ -2261,7 +2261,7 @@ class StacMonitorApp(tk.Tk):
         terms  = self._active_terms()
         _pfx   = COLLECTION_ID + "_"
         blocks = []
-        for item in self._visible_items:
+        for item in sorted(self._visible_items, key=stac_item_acq_date, reverse=True):
             iid     = item["id"]
             display = iid[len(_pfx):] if iid.startswith(_pfx) else iid
             year    = stac_item_year(item)
@@ -2383,7 +2383,8 @@ class StacMonitorApp(tk.Tk):
         blocks      = []
         asset_count = 0
         large_count = 0
-        for item in self._visible_items:
+        # Neuestes Item zuoberst – gleiche Reihenfolge wie in der Baumansicht
+        for item in sorted(self._visible_items, key=stac_item_acq_date, reverse=True):
             iid     = item["id"]
             display = iid[len(_pfx):] if iid.startswith(_pfx) else iid
             year    = stac_item_year(item)
