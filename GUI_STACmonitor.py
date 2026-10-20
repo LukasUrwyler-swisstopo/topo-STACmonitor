@@ -354,6 +354,9 @@ class StacMonitorApp(tk.Tk):
     _CHK_OFF     = "◯"
     _CHK_PARTIAL = "◐"
 
+    _CRED_BTN_LABEL        = "Credentials laden"
+    _CRED_LOADED_BTN_LABEL = "Credentials geladen"
+
     _LOAD_BTN_LABEL    = "ITEM-Liste laden"
     _RELOAD_BTN_LABEL  = "ITEM-Liste aktualisieren"
     _SPINNER_FRAMES    = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -519,28 +522,33 @@ class StacMonitorApp(tk.Tk):
                              padding=8, style="Section.TLabelframe")
         sec.pack(fill="x", pady=(0, 4))
 
-        # Eine einzige Zeile statt zwei: die URL muss nicht separat ausge-
-        # schrieben stehen (der "STAC Browser öffnen"-Button verlinkt ohnehin
-        # dorthin) – der frei gewordene Platz nimmt stattdessen direkt den
-        # "Credentials laden"-Button samt Status auf.
+        # Zeile 1: "Credentials laden" vor der Umgebungswahl – der Lade-Status
+        # steckt im Button selbst (Text + Farbe amber/grün), kein separates Label.
+        # Zeile 2: "ITEM-Liste laden" direkt darunter + "STAC Browser öffnen".
+        # Die URL steht nicht separat da – "STAC Browser öffnen" verlinkt
+        # ohnehin dorthin.
         row1 = ttk.Frame(sec)
         row1.pack(side="top", anchor="w")
 
+        self._cred_btn = ttk.Button(row1, text=self._CRED_BTN_LABEL,
+                                     command=self._load_credentials, style="Amber.TButton")
+        self._cred_btn.pack(side="left", padx=(0, 16))
+
         ttk.Label(row1, text="Umgebung:").pack(side="left", padx=(0, 6))
-        self._env_var = tk.StringVar(value="INT")
+        self._env_var = tk.StringVar(value="PROD")
         for env in ("INT", "PROD"):
             ttk.Radiobutton(row1, text=env, variable=self._env_var, value=env,
                             command=self._on_env_change).pack(side="left", padx=4)
 
-        self._cred_btn = ttk.Button(row1, text="Credentials laden",
-                                     command=self._load_credentials, style="Amber.TButton")
-        self._cred_btn.pack(side="left", padx=(12, 6))
+        row2 = ttk.Frame(sec)
+        row2.pack(side="top", anchor="w", pady=(6, 0))
 
-        self._cred_lbl = ttk.Label(row1, text="nicht geladen",
-                                    font=("Segoe UI", 9, "italic"), style="Dim.TLabel")
-        self._cred_lbl.pack(side="left", padx=(0, 16))
+        self._load_btn = ttk.Button(
+            row2, text=self._LOAD_BTN_LABEL, command=self._load, state="disabled",
+            style="AmberBold.TButton")
+        self._load_btn.pack(side="left", padx=(0, 6))
 
-        ttk.Button(row1, text="STAC Browser öffnen",
+        ttk.Button(row2, text="STAC Browser öffnen",
                    command=self._open_stac_browser).pack(side="left")
 
     def _build_filters(self, parent):
@@ -726,21 +734,13 @@ class StacMonitorApp(tk.Tk):
         toolbar = ttk.Frame(frame)
         toolbar.grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 4))
 
-        # "ITEM-Liste laden" steht direkt links neben den Auswahl-/Klapp-
-        # Toggle-Buttons über der Liste statt in einer eigenen Zeile darüber
-        # – spart eine ganze Zeile Höhe zugunsten des Listenfensters.
-        #
         # "Alle auswählen"/"Alles abwählen" und "Alle aufklappen"/"Alle
         # einklappen" sind je ein einzelner Toggle-Button (Text + Amber-Stil
         # wechseln je nach aktuellem Zustand) statt zwei Buttons pro Aktion –
-        # spart zusätzlich Platz.
+        # spart Platz. ("ITEM-Liste laden" sitzt in Abschnitt 1, siehe
+        # _build_credentials.)
         toggle_row = ttk.Frame(toolbar)
         toggle_row.pack(side="top", anchor="w")
-
-        self._load_btn = ttk.Button(
-            toggle_row, text=self._LOAD_BTN_LABEL, command=self._load, state="disabled",
-            style="AmberBold.TButton")
-        self._load_btn.pack(side="left", padx=(0, 16))
 
         _btn_w = 18
 
@@ -854,11 +854,11 @@ class StacMonitorApp(tk.Tk):
         row1 = ttk.Frame(sec1)
         row1.pack(side="top", anchor="w")
         ttk.Label(row1, text="Umgebung:").pack(side="left", padx=(0, 6))
-        self._gdwh_env_var = tk.StringVar(value="INT")
+        self._gdwh_env_var = tk.StringVar(value="PROD")
         for env in ("INT", "PROD"):
             ttk.Radiobutton(row1, text=env, variable=self._gdwh_env_var, value=env,
                             command=self._gdwh_on_env_change).pack(side="left", padx=4)
-        self._gdwh_url_lbl = ttk.Label(row1, text=GDWH_ENVIRONMENTS["INT"],
+        self._gdwh_url_lbl = ttk.Label(row1, text=GDWH_ENVIRONMENTS[self._gdwh_env_var.get()],
                                        font=("Segoe UI", 8), style="Dim.TLabel")
         self._gdwh_url_lbl.pack(side="left", padx=12)
 
@@ -1356,10 +1356,11 @@ class StacMonitorApp(tk.Tk):
 
     def _on_env_change(self):
         self._auth = None
-        self._cred_lbl.configure(text="nicht geladen")
-        self._cred_btn.configure(style="Amber.TButton")
-        self._load_btn.config(state="disabled")
-        self._load_btn.configure(style="AmberBold.TButton")
+        self._cred_btn.configure(text=self._CRED_BTN_LABEL, style="Amber.TButton")
+        # Geladene Liste gehört zur alten Umgebung -> wieder "laden" statt "aktualisieren"
+        self._items_loaded_once = False
+        self._load_btn.configure(text=self._LOAD_BTN_LABEL, state="disabled",
+                                 style="AmberBold.TButton")
 
     def _open_stac_browser(self, item_id: Optional[str] = None):
         url = browser_url(self._env_var.get(), item_id)
@@ -1413,15 +1414,12 @@ class StacMonitorApp(tk.Tk):
             creds          = cfg[env]
             self._auth     = (creds["username"], creds["password"])
             self._base_url = ENVIRONMENTS[env]
-            T = DARK if self._dark else LIGHT
-            self._cred_lbl.configure(
-                text=f"Geladen: {creds['username']}", foreground=T["ok"])
-            self._cred_btn.configure(style="TButton")
+            self._cred_btn.configure(text=self._CRED_LOADED_BTN_LABEL, style="Green.TButton")
             self._load_btn.config(state="normal")
             self._log_write(f"[Credentials] {env} – {creds['username']}\n")
         except Exception as exc:
-            T = DARK if self._dark else LIGHT
-            self._cred_lbl.configure(text="Fehler!", foreground=T["err"])
+            self._cred_btn.configure(text=self._CRED_BTN_LABEL, style="Amber.TButton")
+            self._log_write(f"[Credentials] FEHLER ({env}): {exc}\n")
             messagebox.showerror("Credentials-Fehler", str(exc))
 
     # ── Laden ─────────────────────────────────────────────────────────────────
@@ -1503,7 +1501,10 @@ class StacMonitorApp(tk.Tk):
             self.after_cancel(self._spinner_job)
             self._spinner_job = None
         label = self._RELOAD_BTN_LABEL if self._items_loaded_once else self._LOAD_BTN_LABEL
-        self._load_btn.config(text=label)
+        # Grün nur, wenn dieser Lauf tatsächlich Items geliefert hat – _load()
+        # leert _all_items vorab, bei Fehler/leerem Resultat bleibt sie leer.
+        style = "Green.TButton" if self._all_items else "TButton"
+        self._load_btn.config(text=label, style=style)
 
     # ── Generischer Busy-Spinner für weitere Buttons ─────────────────────────
     # (eigenständig vom Lade-Spinner oben, damit mehrere Buttons parallel

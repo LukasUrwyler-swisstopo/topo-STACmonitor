@@ -25,10 +25,12 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ### Tab STAC
 
-3. Im GUI oben: **Umgebung** (INT/PROD) wählen und **Credentials laden**
+3. Im GUI oben (Abschnitt 1): **Umgebung** wählen (Default PROD) und
+   **Credentials laden**
 4. Optional Filter setzen (Auftragstyp, Jahr, Area, Item-ID, Asset-Key,
    Dateiendung tif/laz/jpg/kml/txt),
-   dann **ITEM-Liste laden** klicken
+   dann in Abschnitt 1 **ITEM-Liste laden** klicken (daneben:
+   **STAC Browser öffnen**)
 5. In der Baumansicht die gewünschten Items/Assets per Checkbox auswählen
    (oder **Alles auswählen**)
 6. Im Bereich **STAC-Funktionen** (Details siehe
@@ -43,7 +45,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ### Tab GDWH
 
-1. **Umgebung** (INT/PROD) wählen – Authentifizierung läuft automatisch über
+1. **Umgebung** wählen (Default PROD) – Authentifizierung läuft automatisch über
    die aktuelle Windows-Session (kein Credentials-Schritt nötig)
 2. **GDS-Key** wählen (`SB_DOP`, `SB_DOP_16`, `SB_DSM`, `SB_DSM_PUNKTWOLKE`,
    oder **Alle GDS-Keys** für alle vier zusammen – die GDWH-API kennt keinen
