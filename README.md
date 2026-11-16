@@ -2,8 +2,7 @@
 
 GUI-Tool zur Überwachung der **STAC-Collection**
 `ch.swisstopo.spezialbefliegungen` auf INT- und PROD-Umgebung von swisstopo /
-BGDI, sowie DataPackages im **Geodata-Warehouse (GDWH)**.
-Read-only-GUI.
+BGDI. Read-only-GUI.
 
 Angebunden ist die **STAC-API v1** (`.../api/stac/v1/`, liefert
 `stac_version: 1.0.0`). Der Vorgänger `v0.9` antwortet noch, ist aber
@@ -42,33 +41,6 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
      **Asset-Download** (bzw. **Asset-href-Links**) als Datei exportieren
    - **direkter Download**: **Download Assets** auf die eigene Festplatte
 7. **ASSET Viewer**: einzeln ausgewählte Assets (ausser 16bit und copc) direkt in map.geo.admin.ch anzeigen, wahlweise im Browser oder in einem angedockten Viewer-Fenster
-
-### Tab GDWH
-
-1. **Umgebung** wählen (Default PROD) – Authentifizierung läuft automatisch über
-   die aktuelle Windows-Session (kein Credentials-Schritt nötig)
-2. **GDS-Key** wählen (`SB_DOP`, `SB_DOP_16`, `SB_DSM`, `SB_DSM_PUNKTWOLKE`,
-   oder **Alle GDS-Keys** für alle vier zusammen – die GDWH-API kennt keinen
-   eigenen "Alle"-Endpunkt, das Tool fragt die Keys dafür nacheinander ab),
-   optional **Jahr** eintragen, dann **Imports laden**
-3. Die Liste zeigt pro DataPackage Jahr, Auftragstyp, Area, StacItemDatetime,
-   einen Status sowie (rechts, nach Status) den GDS-Key des Imports:
-   - **✓ OK** – FileMetadata-Match vorhanden, Area und StacItemDatetime
-     gesetzt
-   - **: warning : unvollständig** – FileMetadata-Match vorhanden, aber Area oder
-     StacItemDatetime fehlt
-   - **: warning : Kein FileMetadata-Match** – zu diesem Import existiert kein
-     FileMetadata-Eintrag; deutet auf einen unsauberen GDWH-Zustand hin
-     (z.B. eine frühere, unvollständige Löschung)
-
-   Der Jahresfilter, der **Auftragstyp**-Dropdown (`Alle` / `RAM` / `KRY`)
-   sowie das **Area**-Textfeld (optional; filtert als Teilstring-Suche,
-   z.B. `ALETSCH` findet auch `ALETSCH_MOOSFLUE`; leer = alle Areas)
-   filtern die bereits geladene Liste sofort weiter, ohne Neu-Laden. Mit
-   **Nur Fehlerhafte anzeigen** blendet die Liste auf die beiden ': warning :'-Status
-   ein, statt durch alle DataPackages scrollen zu müssen; ein zweiter
-   Klick (**Alle DataPackages anzeigen**) hebt den Filter wieder auf. Alle
-   Filter lassen sich kombinieren.
 
 ## Funktionen
 
@@ -132,10 +104,6 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 - Statistik (OK/Fehler/Gesamtgrösse), Item-JSON-Detailansicht,
   Hell/Dark-Theme
-- **Tab GDWH** – Liste der DataPackages je GDS-Key (einzeln oder für alle
-  GDS-Keys zusammen) mit Jahr/Auftragstyp/Area/StacItemDatetime,
-  Validitäts-Status und GDS-Key, inkl. Filter auf nur fehlerhafte
-  DataPackages (siehe [Tab GDWH](#tab-gdwh))
 
 ## Voraussetzungen
 
@@ -144,10 +112,6 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 - Für das angedockte Viewer-Fenster: Google Chrome oder Microsoft Edge.
   Das Paket `pywin32` wird beim ersten Start bei Bedarf automatisch
   nachinstalliert
-- Für den GDWH-Tab: Paket `requests-negotiate-sspi` (wird beim ersten Start
-  bei Bedarf automatisch nachinstalliert). Authentifizierung läuft über
-  Windows SSPI mit dem aktuell eingeloggten User – keine separaten
-  Zugangsdaten nötig, GDWH ist nur im internen Netz / VPN erreichbar
 
 ## Einrichtung
 
@@ -166,8 +130,7 @@ Firmenproxy als `proxy-bvcol.admin.ch:8080` verwendet wird. Der Ordner
 
 Im Bundesnetz läuft der Zugriff automatisch über diesen Proxy; ausserhalb
 (z.B. privater Rechner) schaltet das Tool selbstständig auf eine
-Direktverbindung um. Der GDWH-Tab braucht keine Zugangsdaten (Windows-SSPI)
-und verbindet sich direkt, ohne Proxy.
+Direktverbindung um.
 
 ## Dateien
 
@@ -175,7 +138,6 @@ und verbindet sich direkt, ohne Proxy.
 |---|---|
 | `GUI_STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
-| `api/gdwh_api.py` | GDWH-API-Hilfsfunktionen (read-only) |
 | `test/test_functions.py` | Unit-Tests (pytest) |
 | `secrets/stac_credentials.json` | Zugangsdaten INT/PROD (nicht versioniert) |
 | `secrets/proxy_config.json` | Proxy-Konfiguration (nicht versioniert) |

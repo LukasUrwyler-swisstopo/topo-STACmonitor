@@ -27,7 +27,7 @@ import threading
 import time
 import concurrent.futures
 import webbrowser
-from datetime import datetime, timedelta
+from datetime import datetime
 from email.utils import parsedate
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -45,30 +45,6 @@ from api.stac_api import (
     build_stac_item, is_cog_asset, is_ebo_ebn_asset, ebo_ebn_kml_item_id,
     is_thumbnail_asset, map_viewer_url, embed_viewer_url, union_bbox,
 )
-from api.gdwh_api import (
-    GDWH_GDS_KEYS, GDWH_ENVIRONMENTS,
-    gdwh_get_imports, gdwh_import_id, gdwh_import_date,
-    gdwh_search_file_metadata, gdwh_index_file_metadata_by_import,
-)
-
-# GDWH indexiert den fileMetadata-Suchindex (Area/Jahr/Auftragstyp) zeitversetzt
-# zum eigentlichen Import – live verifiziert am 2026-08-20: ein Import von
-# vor >1h hatte noch keinen Match, alle älteren Imports desselben Tages
-# (ab ca. 4h zuvor) bereits. Innerhalb dieses Fensters ist "kein Match" also
-# normal und KEINE Anomalie. Erst danach gilt ein fehlender Match als
-# vermutlich verwaister Alt-Eintrag (siehe _gdwh_apply_filter).
-_GDWH_PENDING_HOURS = 24
-
-
-def _gdwh_is_pending(imp: Dict) -> bool:
-    """True, wenn ein Import jünger als _GDWH_PENDING_HOURS ist. Für so junge
-    Imports ist ein fehlender FileMetadata-Match durch die Indexierungs-
-    Verzögerung von GDWH erklärt, nicht durch eine echte Anomalie."""
-    try:
-        imp_dt = datetime.strptime(gdwh_import_date(imp), "%Y-%m-%d %H:%M")
-    except ValueError:
-        return False
-    return datetime.now() - imp_dt < timedelta(hours=_GDWH_PENDING_HOURS)
 
 # Firmenproxy für pip, falls die direkte Verbindung zu PyPI im Bundesnetz
 # fehlschlägt (analog zum Proxy-Fallback in stac_api.py).
@@ -442,13 +418,6 @@ class StacMonitorApp(tk.Tk):
         self._viewer_profile_dir: Optional[str] = None
         self._reposition_job: Optional[str] = None
 
-        # GDWH-Tab: rohe Imports + angereicherte (Import, FileMetadata-Match, GDS-Key)
-        # Tripel der aktuell geladenen Umgebung/GDS-Key-Auswahl (ein oder alle Keys).
-        self._gdwh_enriched: List[Tuple[Dict, Optional[Dict], str]] = []
-        self._gdwh_total_leichen: int = 0
-        self._gdwh_current_gds_key: str = ""
-        self._gdwh_base_url: str = ""
-
         self._build_ui()
         self._apply_theme(True)
 
@@ -500,10 +469,6 @@ class StacMonitorApp(tk.Tk):
         self._build_stac_functions(stac_tab)
         self._build_stats(stac_tab)
         self._build_tree(stac_tab)
-
-        gdwh_tab = ttk.Frame(self._nb)
-        self._nb.add(gdwh_tab, text="GDWH")
-        self._build_gdwh_tab(gdwh_tab)
 
     def _optional_label(self, parent, text):
         """Label mit einem '[...]'-Zusatz (z.B. '[optional]') kursiv und
@@ -830,353 +795,6 @@ class StacMonitorApp(tk.Tk):
             self._log_body.pack_forget()
             self._log_toggle_btn.config(text="▸ Details einblenden")
 
-    # ── GDWH-Tab (read-only) ─────────────────────────────────────────────────
-
-    _GDWH_COLS      = ("year", "auftragstyp", "area", "stac_dt", "status", "gds_key")
-    _GDWH_COL_HEADS = {"year": "Jahr", "auftragstyp": "Auftragstyp",
-                        "area": "Area", "stac_dt": "StacItemDatetime", "status": "Status",
-                        "gds_key": "GDS-Key"}
-    _GDWH_COL_W     = {"year": 60, "auftragstyp": 110, "area": 200,
-                        "stac_dt": 220, "status": 260, "gds_key": 130}
-
-    _GDWH_LOAD_BTN_LABEL   = "Imports laden"
-    _GDWH_RELOAD_BTN_LABEL = "Imports aktualisieren"
-    _GDWH_ALL_KEYS_LABEL   = "Alle GDS-Keys"
-    _GDWH_LEICHEN_BTN_LABEL      = f"GDWH-Anomalien anzeigen (>{_GDWH_PENDING_HOURS}h ohne Daten)"
-    _GDWH_LEICHEN_BTN_LABEL_BACK = "Zurück zur normalen Ansicht"
-    _GDWH_AUFTRAGSTYP_OPTIONS   = ["Alle", "RAM", "KRY"]
-
-    def _build_gdwh_tab(self, parent):
-        sec1 = ttk.LabelFrame(parent, text="1   Umgebung",
-                              padding=8, style="Section.TLabelframe")
-        sec1.pack(fill="x", pady=(0, 4))
-
-        row1 = ttk.Frame(sec1)
-        row1.pack(side="top", anchor="w")
-        ttk.Label(row1, text="Umgebung:").pack(side="left", padx=(0, 6))
-        self._gdwh_env_var = tk.StringVar(value="PROD")
-        for env in ("INT", "PROD"):
-            ttk.Radiobutton(row1, text=env, variable=self._gdwh_env_var, value=env,
-                            command=self._gdwh_on_env_change).pack(side="left", padx=4)
-        self._gdwh_url_lbl = ttk.Label(row1, text=GDWH_ENVIRONMENTS[self._gdwh_env_var.get()],
-                                       font=("Segoe UI", 8), style="Dim.TLabel")
-        self._gdwh_url_lbl.pack(side="left", padx=12)
-
-        ttk.Label(
-            sec1,
-            text="Authentifizierung: Windows-Session (aktuell eingeloggter User, wie im Browser) "
-                 "– read-only, es wird nichts verändert/gelöscht.",
-            font=("Segoe UI", 8, "italic"), style="Dim.TLabel",
-        ).pack(side="top", anchor="w", pady=(6, 0))
-
-        sec2 = ttk.LabelFrame(parent, text="2   GDS-Key & Filter",
-                              padding=8, style="Section.TLabelframe")
-        sec2.pack(fill="x", pady=(0, 4))
-
-        ttk.Label(sec2, text="GDS-Key:").grid(row=0, column=0, sticky="w", padx=(0, 8))
-        self._gdwh_gds_key_var = tk.StringVar(value=GDWH_GDS_KEYS[0])
-        gdwh_gds_combo = ttk.Combobox(
-            sec2, textvariable=self._gdwh_gds_key_var,
-            values=[self._GDWH_ALL_KEYS_LABEL] + GDWH_GDS_KEYS, state="readonly", width=24,
-        )
-        gdwh_gds_combo.grid(row=0, column=1, sticky="w", padx=(0, 16))
-
-        self._optional_label(sec2, "Jahr [optional]:").grid(
-            row=0, column=2, sticky="w", padx=(0, 6))
-        self._gdwh_year_var = tk.StringVar()
-        self._gdwh_year_var.trace_add("write", lambda *_: self._gdwh_apply_filter())
-        ttk.Entry(sec2, textvariable=self._gdwh_year_var, width=8).grid(
-            row=0, column=3, sticky="w")
-        ttk.Label(
-            sec2, text="z.B. 2023  —  Leer = alle Jahre",
-            font=("Segoe UI", 8, "italic"), style="Dim.TLabel",
-        ).grid(row=0, column=4, sticky="w", padx=(8, 0))
-
-        # Normalansicht vs. GDWH-Anomalien: ein Import ohne FileMetadata-Match
-        # (match is None) ist entweder frisch importiert und noch nicht
-        # indexiert ("pending", jünger als _GDWH_PENDING_HOURS – bleibt in der
-        # Normalansicht sichtbar) oder er existiert vermutlich nicht mehr
-        # wirklich in GDWH (älter als _GDWH_PENDING_HOURS – nur der
-        # Historieneintrag in GET /data/imports bleibt). Diese eigene,
-        # separat einsehbare Kategorie sorgt dafür, dass die Standardansicht
-        # nur noch wirklich in GDWH vorhandene Daten zeigt.
-        self._gdwh_show_leichen_var = tk.BooleanVar(value=False)
-        self._gdwh_leichen_btn = ttk.Button(
-            sec2, text=self._GDWH_LEICHEN_BTN_LABEL,
-            command=self._gdwh_toggle_leichen,
-        )
-        self._gdwh_leichen_btn.grid(row=1, column=0, columnspan=2, sticky="w", pady=(6, 0))
-
-        ttk.Label(sec2, text="Auftragstyp:").grid(
-            row=1, column=2, sticky="w", padx=(0, 6), pady=(6, 0))
-        self._gdwh_auftragstyp_var = tk.StringVar(value=self._GDWH_AUFTRAGSTYP_OPTIONS[0])
-        self._gdwh_auftragstyp_var.trace_add("write", lambda *_: self._gdwh_apply_filter())
-        ttk.Combobox(
-            sec2, textvariable=self._gdwh_auftragstyp_var,
-            values=self._GDWH_AUFTRAGSTYP_OPTIONS, state="readonly", width=10,
-        ).grid(row=1, column=3, sticky="w", pady=(6, 0))
-
-        self._optional_label(sec2, "Area [optional]:").grid(
-            row=1, column=4, sticky="w", padx=(16, 6), pady=(6, 0))
-        self._gdwh_area_var = tk.StringVar()
-        self._gdwh_area_var.trace_add("write", lambda *_: self._gdwh_apply_filter())
-        ttk.Entry(sec2, textvariable=self._gdwh_area_var, width=16).grid(
-            row=1, column=5, sticky="w", pady=(6, 0))
-
-        self._gdwh_load_btn = ttk.Button(
-            sec2, text=self._GDWH_LOAD_BTN_LABEL,
-            command=self._gdwh_load,
-        )
-        self._gdwh_load_btn.grid(
-            row=3, column=0, columnspan=6, sticky="w", pady=(10, 0))
-
-        sec3 = ttk.LabelFrame(parent, text="3   DataPackages",
-                              padding=4, style="Section.TLabelframe")
-        sec3.pack(fill="both", expand=True, pady=(0, 4))
-        sec3.rowconfigure(0, weight=1)
-        sec3.columnconfigure(0, weight=1)
-
-        self._gdwh_tree = ttk.Treeview(
-            sec3, columns=self._GDWH_COLS, show="headings", selectmode="browse")
-        for col in self._GDWH_COLS:
-            self._gdwh_tree.column(col, width=self._GDWH_COL_W[col],
-                                   minwidth=55, stretch=(col == "status"), anchor="w")
-            self._gdwh_tree.heading(col, text=self._GDWH_COL_HEADS[col])
-
-        vsb = ttk.Scrollbar(sec3, orient="vertical", command=self._gdwh_tree.yview)
-        self._gdwh_tree.configure(yscrollcommand=vsb.set)
-        self._gdwh_tree.grid(row=0, column=0, sticky="nsew")
-        vsb.grid(row=0, column=1, sticky="ns")
-
-        self._gdwh_stats_outer = tk.Frame(parent)
-        self._gdwh_stats_outer.pack(fill="x", pady=(2, 0))
-        self._gdwh_stats_lbl = tk.Label(
-            self._gdwh_stats_outer, text="Keine Daten geladen.",
-            font=("Segoe UI", 9), anchor="w")
-        self._gdwh_stats_lbl.pack(side="left", padx=4)
-
-    def _gdwh_on_env_change(self):
-        self._gdwh_url_lbl.configure(text=GDWH_ENVIRONMENTS[self._gdwh_env_var.get()])
-        self._gdwh_enriched = []
-        self._gdwh_total_leichen = 0
-        self._gdwh_total_pending = 0
-        self._gdwh_current_gds_key = ""
-        self._gdwh_tree.delete(*self._gdwh_tree.get_children())
-        self._gdwh_stats_lbl.configure(text="Keine Daten geladen.")
-        self._gdwh_load_btn.config(text=self._GDWH_LOAD_BTN_LABEL, style="TButton")
-        self._gdwh_show_leichen_var.set(False)
-        self._gdwh_leichen_btn.config(text=self._GDWH_LEICHEN_BTN_LABEL, style="TButton")
-
-    def _gdwh_load(self):
-        self._gdwh_load_btn.config(state="disabled")
-        self._gdwh_base_url = GDWH_ENVIRONMENTS[self._gdwh_env_var.get()]
-        gds_key = self._gdwh_gds_key_var.get()
-        env     = self._gdwh_env_var.get()
-        self._gdwh_current_gds_key = gds_key
-        if gds_key == self._GDWH_ALL_KEYS_LABEL:
-            threading.Thread(
-                target=self._gdwh_worker_load_all, args=(env,), daemon=True).start()
-        else:
-            threading.Thread(
-                target=self._gdwh_worker_load, args=(env, [gds_key]), daemon=True).start()
-
-    def _gdwh_worker_load_all(self, env: str):
-        self._gdwh_worker_load(env, GDWH_GDS_KEYS)
-
-    def _gdwh_worker_load(self, env: str, gds_keys: List[str]):
-        try:
-            enriched: List[Tuple[Dict, Optional[Dict], str]] = []
-            total_metadata = 0
-            for gds_key in gds_keys:
-                self._log_write(f"[GDWH] Lade Imports für {env}/{gds_key} …\n")
-                imports = gdwh_get_imports(self._gdwh_base_url, gds_key)
-                self._log_write(f"[GDWH] {len(imports)} Import(s) gefunden. "
-                                f"Lade FileMetadata …\n")
-                file_metadata = gdwh_search_file_metadata(self._gdwh_base_url, gds_key)
-                meta_index = gdwh_index_file_metadata_by_import(file_metadata)
-                total_metadata += len(file_metadata)
-
-                for imp in imports:
-                    match = meta_index.get(gdwh_import_id(imp))
-                    enriched.append((imp, match, gds_key))
-
-            self._gdwh_enriched = enriched
-            self._log_write(f"[GDWH] {total_metadata} FileMetadata-Eintrag/Einträge "
-                            f"gefunden, {len(enriched)} Import(s) angereichert.\n")
-            self.after(0, self._gdwh_apply_filter)
-            # Text/Style erst NACH erfolgreichem Laden auf "aktualisieren"/Amber
-            # umstellen – bei einem Fehler unten bleibt der Ausgangszustand
-            # bestehen, sonst würde ein fehlgeschlagener Ladeversuch fälschlich
-            # als "bereits geladen" angezeigt.
-            self.after(0, lambda: self._gdwh_load_btn.config(
-                text=self._GDWH_RELOAD_BTN_LABEL, style="Amber.TButton"))
-
-            pending_count = sum(1 for imp, match, _gds_key in enriched
-                                 if match is None and _gdwh_is_pending(imp))
-            if pending_count:
-                self.after(50, lambda: self._gdwh_show_pending_notice(pending_count))
-        except Exception as exc:
-            self._log_write(f"[GDWH FEHLER] {exc}\n")
-            self.after(0, lambda msg=str(exc): messagebox.showerror("GDWH Fehler", msg))
-        finally:
-            self.after(0, lambda: self._gdwh_load_btn.config(state="normal"))
-
-    def _gdwh_show_pending_notice(self, count: int):
-        """Info-Popup nach dem Laden: weist auf frisch importierte, noch nicht
-        indexierte DataPackages hin (siehe _gdwh_is_pending/_GDWH_PENDING_HOURS).
-        Läuft nur einmal pro Ladevorgang, nicht bei jeder Filteränderung."""
-        messagebox.showinfo(
-            "Frisch importierte DataPackages",
-            f"{count} DataPackage(s) wurden erst kürzlich importiert. GDWH zeigt "
-            f"sie im Portal zwar bereits an, aktualisiert seinen FileMetadata-Index "
-            f"(Area/Jahr/Auftragstyp) aber zeitversetzt — das kann einige Stunden "
-            f"dauern.\n\n"
-            f"Diese Packages sind in der Liste mit „⏳ Frisch importiert“ markiert.\n\n"
-            f"Bitte in ein paar Stunden nochmals „{self._GDWH_RELOAD_BTN_LABEL}“ "
-            f"klicken, um den aktuellen Stand zu prüfen."
-        )
-
-    def _gdwh_toggle_leichen(self):
-        active = not self._gdwh_show_leichen_var.get()
-        self._gdwh_show_leichen_var.set(active)
-        self._gdwh_leichen_btn.config(
-            text=self._GDWH_LEICHEN_BTN_LABEL_BACK if active
-                 else self._GDWH_LEICHEN_BTN_LABEL,
-            style="Amber.TButton" if active else "TButton")
-        self._gdwh_apply_filter()
-
-    def _gdwh_apply_filter(self):
-        year         = self._gdwh_year_var.get().strip()
-        leichen_mode = self._gdwh_show_leichen_var.get()
-        auftragstyp  = self._gdwh_auftragstyp_var.get()
-        area_query   = self._gdwh_area_var.get().strip().lower()
-        # Drei Kategorien pro Import (siehe _gdwh_populate_tree für die Status-Anzeige):
-        #   - "aktiv"/"unvollständig": FileMetadata-Match vorhanden.
-        #   - "pending": kein Match, aber Import jünger als _GDWH_PENDING_HOURS
-        #     → GDWH hat die Attribute nur noch nicht nachindexiert, keine Anomalie.
-        #   - "anomalie": kein Match und älter als _GDWH_PENDING_HOURS → GDWH hat
-        #     dafür (noch) keinen FileMetadata-Eintrag geliefert.
-        # WICHTIG: alle drei Kategorien werden in der Normalansicht IMMER
-        # angezeigt (jede reale /data/imports-Zeile bleibt sichtbar, auch ohne
-        # FileMetadata-Match – ein fehlender Match beweist nicht, dass die
-        # Daten nicht mehr in GDWH existieren, siehe Portal-Abgleich). Der
-        # Anomalien-Toggle filtert nur zusätzlich auf "anomalie", er blendet
-        # in der Normalansicht nichts aus.
-        def _is_leiche(item):
-            imp, match, _gds_key = item
-            return match is None and not _gdwh_is_pending(imp)
-
-        if leichen_mode:
-            data = [item for item in self._gdwh_enriched if _is_leiche(item)]
-        else:
-            data = list(self._gdwh_enriched)
-        if year:
-            def _year_matches(item):
-                imp, match, _gds_key = item
-                if match:
-                    for src in (match.get("stac_datetime", ""), match.get("year", "")):
-                        m = re.search(r"(?<!\d)(20\d{2})(?!\d)", src)
-                        if m:
-                            return m.group(1) == year
-                m = re.search(r"(?<!\d)(20\d{2})(?!\d)", gdwh_import_date(imp))
-                return m.group(1) == year if m else True
-            data = [item for item in data if _year_matches(item)]
-        if auftragstyp != "Alle":
-            data = [item for item in data
-                    if (item[1] or {}).get("auftragstyp", "").strip().lower() == auftragstyp.lower()]
-        if area_query:
-            data = [item for item in data
-                    if area_query in (item[1] or {}).get("area", "").lower()]
-        filtered = bool(year) or auftragstyp != "Alle" or bool(area_query)
-        self._gdwh_total_leichen = sum(
-            1 for item in self._gdwh_enriched if _is_leiche(item))
-        self._gdwh_total_pending = sum(
-            1 for imp, match, _gds_key in self._gdwh_enriched
-            if match is None and _gdwh_is_pending(imp))
-        self._gdwh_populate_tree(data, filtered=filtered, leichen_mode=leichen_mode)
-
-    def _gdwh_populate_tree(self, enriched: List[Tuple], filtered: bool = False,
-                             leichen_mode: bool = False):
-        self._gdwh_tree.delete(*self._gdwh_tree.get_children())
-        if not enriched:
-            if leichen_mode:
-                msg = "0 GDWH-Anomalien gefunden."
-            elif filtered:
-                msg = "0 DataPackages nach Filter."
-            else:
-                msg = "0 DataPackages gefunden."
-            self._gdwh_stats_lbl.configure(text=msg)
-            return
-
-        def _year_key(item):
-            imp, match, _gds_key = item
-            if match:
-                for src in (match.get("stac_datetime", ""), match.get("year", "")):
-                    m = re.search(r"(?<!\d)(20\d{2})(?!\d)", src)
-                    if m:
-                        return int(m.group(1))
-            m = re.search(r"(?<!\d)(20\d{2})(?!\d)", gdwh_import_date(imp))
-            return int(m.group(1)) if m else 0
-
-        incomplete_count = 0
-        for imp, match, gds_key in sorted(enriched, key=_year_key, reverse=True):
-            area          = match.get("area", "")          if match else ""
-            auftragstyp   = match.get("auftragstyp", "")   if match else ""
-            stac_datetime = match.get("stac_datetime", "") if match else ""
-
-            year = ""
-            if match:
-                for src in (stac_datetime, match.get("year", "")):
-                    m = re.search(r"(?<!\d)(20\d{2})(?!\d)", src)
-                    if m:
-                        year = m.group(1)
-                        break
-            pending = match is None and _gdwh_is_pending(imp)
-            if not year:
-                m = re.search(r"(?<!\d)(20\d{2})(?!\d)", gdwh_import_date(imp))
-                year = m.group(1) if m else ("NEU" if pending else "????")
-
-            if match is None and pending:
-                # Frisch importiert, GDWH-Index zieht noch nach – siehe
-                # _gdwh_is_pending. Keine Anomalie.
-                status, tag = "⏳ Frisch importiert — Attribute folgen", "asset_warn"
-            elif match is None:
-                # Seit über _GDWH_PENDING_HOURS ohne FileMetadata-Match. Bleibt
-                # trotzdem sichtbar (siehe _gdwh_apply_filter) – die Zeile
-                # stammt aus /data/imports und ist damit ein realer Import,
-                # auch wenn GDWH (noch) keinen FileMetadata-Treffer liefert.
-                status, tag = f"⚠ Kein FileMetadata-Match seit über {_GDWH_PENDING_HOURS}h", "asset_err"
-            elif not area or not stac_datetime:
-                status, tag = "⚠ unvollständig", "asset_warn"
-                incomplete_count += 1
-            else:
-                status, tag = "✓ OK", "asset_ok"
-
-            self._gdwh_tree.insert(
-                "", "end",
-                values=(year, auftragstyp or "–", area or "–", stac_datetime or "–",
-                        status, gds_key),
-                tags=(tag,),
-            )
-
-        total = len(enriched)
-        if leichen_mode:
-            self._gdwh_stats_lbl.configure(
-                text=f"{total} GDWH-Anomalie(n) — seit über {_GDWH_PENDING_HOURS}h "
-                     f"ohne FileMetadata-Match (Filter auf diese Kategorie).")
-            return
-
-        anomaly_note = f"  |  ⚠ {incomplete_count} unvollständig" if incomplete_count else ""
-        total_pending = getattr(self, "_gdwh_total_pending", 0)
-        pending_note = (f"  |  {total_pending} frisch importiert, noch nicht indexiert"
-                        ) if total_pending else ""
-        total_leichen = getattr(self, "_gdwh_total_leichen", 0)
-        leichen_note = (f"  |  {total_leichen} ohne FileMetadata-Match "
-                        f"(Button „{self._GDWH_LEICHEN_BTN_LABEL}“ zum Herausfiltern)"
-                        ) if total_leichen else ""
-        self._gdwh_stats_lbl.configure(
-            text=f"{total} DataPackage(s) geladen{anomaly_note}{pending_note}{leichen_note}")
-
     # ── Theme ─────────────────────────────────────────────────────────────────
 
     def _toggle_theme(self):
@@ -1314,10 +932,6 @@ class StacMonitorApp(tk.Tk):
         self._tree.tag_configure("asset_warn", foreground=T["tree_warn"])
         self._tree.tag_configure("asset_dim",  foreground=T["tree_dim"])
 
-        self._gdwh_tree.tag_configure("asset_ok",   foreground=T["tree_ok"])
-        self._gdwh_tree.tag_configure("asset_err",  foreground=T["tree_err"])
-        self._gdwh_tree.tag_configure("asset_warn", foreground=T["tree_warn"])
-
         self.configure(bg=T["root"])
         self._hdr.configure(bg=T["hdr_bg"])
         self._hdr_lbl.configure(bg=T["hdr_bg"], fg=T["hdr_fg"])
@@ -1329,8 +943,6 @@ class StacMonitorApp(tk.Tk):
                              insertbackground=T["log_fg"])
         self._stats_outer.configure(bg=T["panel"])
         self._stats_lbl.configure(bg=T["panel"], fg=T["fg_dim"])
-        self._gdwh_stats_outer.configure(bg=T["panel"])
-        self._gdwh_stats_lbl.configure(bg=T["panel"], fg=T["fg_dim"])
         self._ctx.configure(
             bg=T["btn"], fg=T["fg"],
             activebackground=T["sel_bg"], activeforeground=T["sel_fg"])
