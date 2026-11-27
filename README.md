@@ -10,9 +10,8 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ## Schnellstart
 
-1. **Einmalig:** Für den STAC-Tab braucht das Script den `secrets/`-Ordner mit
-   den entsprechenden .json-Dateien (Zugangsdaten). Diese müssen vom
-   Benutzer bei TBKN/swisstopo angefragt werden, siehe
+1. **Kein Login nötig:** Die STAC-API ist für Lesezugriffe öffentlich. Optional
+   lässt sich der Firmenproxy im Ordner `proxys/` anpassen, siehe
    [Einrichtung](#einrichtung)
 2. Tool starten: WIN-Taste + cmd (Terminal starten):
 
@@ -24,8 +23,7 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ### Tab STAC
 
-3. Im GUI oben (Abschnitt 1): **Umgebung** wählen (Default PROD) und
-   **Credentials laden**
+3. Im GUI oben (Abschnitt 1): **Umgebung** wählen (Default PROD)
 4. Optional Filter setzen (Auftragstyp, Jahr, Area, Item-ID, Asset-Key,
    Dateiendung tif/laz/jpg/kml/txt),
    dann in Abschnitt 1 **ITEM-Liste laden** klicken (daneben:
@@ -115,18 +113,14 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ## Einrichtung
 
-Zugangsdaten für den STAC-Tab hinterlegen unter `secrets/stac_credentials.json`:
+Zugangsdaten braucht der Monitor keine: Er liest nur (GET/HEAD), und die
+STAC-API von swisstopo/BGDI ist für Lesezugriffe öffentlich.
 
-```json
-{
-  "INT":  {"username": "...", "password": "..."},
-  "PROD": {"username": "...", "password": "..."}
-}
-```
-
-Optional: `secrets/proxy_config.json` anpassen, falls ein anderer
-Firmenproxy als `proxy-bvcol.admin.ch:8080` verwendet wird. Der Ordner
-`secrets/` ist in `.gitignore` ausgeschlossen und wird nicht versioniert.
+Optional: `proxys/proxy_config.json` anpassen, falls ein anderer
+Firmenproxy als `proxy-bvcol.admin.ch:8080` verwendet wird. Verwendet wird
+der erste Eintrag unter `proxies` mit `"enabled": true`. Fehlt die Datei,
+gilt `proxy-bvcol.admin.ch:8080`. Der Ordner `proxys/` ist in `.gitignore`
+ausgeschlossen und wird nicht versioniert.
 
 Im Bundesnetz läuft der Zugriff automatisch über diesen Proxy; ausserhalb
 (z.B. privater Rechner) schaltet das Tool selbstständig auf eine
@@ -139,5 +133,4 @@ Direktverbindung um.
 | `GUI_STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
 | `test/test_functions.py` | Unit-Tests (pytest) |
-| `secrets/stac_credentials.json` | Zugangsdaten INT/PROD (nicht versioniert) |
-| `secrets/proxy_config.json` | Proxy-Konfiguration (nicht versioniert) |
+| `proxys/proxy_config.json` | Proxy-Konfiguration, optional (nicht versioniert) |

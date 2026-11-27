@@ -506,5 +506,23 @@ def test_download_export_item_line_carries_browser_link(monkeypatch):
         assert zeile == f"item: {iid}; {api.browser_url('PROD', iid, include_lang=False)}"
 
 
+# ─── stac_api.load_proxy_url ───────────────────────────────────────────────
+
+def test_load_proxy_url_first_enabled_entry(tmp_path):
+    cfg = tmp_path / "proxy_config.json"
+    cfg.write_text(
+        '{"proxies": [{"url": "http://aus:1", "enabled": false},'
+        ' {"url": "http://an:2", "enabled": true}]}', encoding="utf-8")
+    assert api.load_proxy_url(cfg) == "http://an:2"
+
+
+def test_load_proxy_url_fallback(tmp_path):
+    # Fehlende und kaputte Datei -> BVCOL-Default
+    assert api.load_proxy_url(tmp_path / "fehlt.json") == api._DEFAULT_PROXY_URL
+    kaputt = tmp_path / "kaputt.json"
+    kaputt.write_text("{kein json", encoding="utf-8")
+    assert api.load_proxy_url(kaputt) == api._DEFAULT_PROXY_URL
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

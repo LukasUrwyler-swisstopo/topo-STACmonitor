@@ -9,8 +9,8 @@ in einer Baumansicht. Funktionen:
   - URL in Zwischenablage kopieren, im Browser öffnen
   - Export der Auswahl als STAC-1.0.0-ItemCollection (Button "STAC-JSON")
 
-Credentials: secrets/stac_credentials.json
-Format:      {"INT": {"username": "...", "password": "..."}, "PROD": {...}}
+Kein Login nötig (STAC-API für Lesezugriffe öffentlich).
+Proxy:       proxys/proxy_config.json (optional, sonst proxy-bvcol.admin.ch:8080)
 """
 
 import ctypes
@@ -38,7 +38,7 @@ from tkinter import ttk, messagebox, scrolledtext, filedialog
 
 from api.stac_api import (
     COLLECTION_ID, ENVIRONMENTS, AUFTRAGSTYPEN, EXT_PRESETS,
-    LARGE_ASSET_THRESHOLD_BYTES,
+    LARGE_ASSET_THRESHOLD_BYTES, PROXY_URL,
     get_item_direct, get_collection_items, filter_items,
     check_asset_info, download_asset, browser_url, asset_area,
     stac_item_year, stac_item_area, stac_item_acq_date,
@@ -47,8 +47,8 @@ from api.stac_api import (
 )
 
 # Firmenproxy für pip, falls die direkte Verbindung zu PyPI im Bundesnetz
-# fehlschlägt (analog zum Proxy-Fallback in stac_api.py).
-_PIP_PROXY = "http://proxy-bvcol.admin.ch:8080"
+# fehlschlägt – derselbe Proxy wie in stac_api.py (proxys/proxy_config.json).
+_PIP_PROXY = PROXY_URL
 
 
 def _ensure_win32_modules():
@@ -330,9 +330,6 @@ class StacMonitorApp(tk.Tk):
     _CHK_OFF     = "◯"
     _CHK_PARTIAL = "◐"
 
-    _CRED_BTN_LABEL        = "Credentials laden"
-    _CRED_LOADED_BTN_LABEL = "Credentials geladen"
-
     _LOAD_BTN_LABEL    = "ITEM-Liste laden"
     _RELOAD_BTN_LABEL  = "ITEM-Liste aktualisieren"
     _SPINNER_FRAMES    = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"
@@ -371,7 +368,8 @@ class StacMonitorApp(tk.Tk):
             pass
 
         self._dark: bool = True
-        self._auth: Optional[Tuple] = None
+        # API-Basis der zuletzt geladenen Item-Liste (wird in _load gesetzt,
+        # damit Worker-Threads nicht auf die Tk-Variable zugreifen müssen)
         self._base_url: str = ""
 
         self._all_items: List[Dict] = []
@@ -457,7 +455,7 @@ class StacMonitorApp(tk.Tk):
 
         stac_tab = ttk.Frame(self._nb)
         self._nb.add(stac_tab, text="STAC")
-        self._build_credentials(stac_tab)
+        self._build_environment(stac_tab)
         self._build_filters(stac_tab)
         # STAC-Funktionen + Stats-Zeile unterhalb der Liste, aber (wie der
         # Log-Frame oben) VOR der expandierenden Liste gepackt (side="bottom"):
@@ -482,22 +480,16 @@ class StacMonitorApp(tk.Tk):
                       font=("Segoe UI", 8, "italic")).pack(side="left")
         return frame
 
-    def _build_credentials(self, parent):
-        sec = ttk.LabelFrame(parent, text="1   Umgebung & Credentials",
+    def _build_environment(self, parent):
+        sec = ttk.LabelFrame(parent, text="1   Umgebung",
                              padding=8, style="Section.TLabelframe")
         sec.pack(fill="x", pady=(0, 4))
 
-        # Zeile 1: "Credentials laden" vor der Umgebungswahl – der Lade-Status
-        # steckt im Button selbst (Text + Farbe amber/grün), kein separates Label.
-        # Zeile 2: "ITEM-Liste laden" direkt darunter + "STAC Browser öffnen".
-        # Die URL steht nicht separat da – "STAC Browser öffnen" verlinkt
-        # ohnehin dorthin.
+        # Zeile 1: Umgebungswahl. Zeile 2: "ITEM-Liste laden" direkt darunter
+        # + "STAC Browser öffnen". Die URL steht nicht separat da – "STAC
+        # Browser öffnen" verlinkt ohnehin dorthin.
         row1 = ttk.Frame(sec)
         row1.pack(side="top", anchor="w")
-
-        self._cred_btn = ttk.Button(row1, text=self._CRED_BTN_LABEL,
-                                     command=self._load_credentials, style="Amber.TButton")
-        self._cred_btn.pack(side="left", padx=(0, 16))
 
         ttk.Label(row1, text="Umgebung:").pack(side="left", padx=(0, 6))
         self._env_var = tk.StringVar(value="PROD")
@@ -509,7 +501,7 @@ class StacMonitorApp(tk.Tk):
         row2.pack(side="top", anchor="w", pady=(6, 0))
 
         self._load_btn = ttk.Button(
-            row2, text=self._LOAD_BTN_LABEL, command=self._load, state="disabled",
+            row2, text=self._LOAD_BTN_LABEL, command=self._load,
             style="AmberBold.TButton")
         self._load_btn.pack(side="left", padx=(0, 6))
 
@@ -703,7 +695,7 @@ class StacMonitorApp(tk.Tk):
         # einklappen" sind je ein einzelner Toggle-Button (Text + Amber-Stil
         # wechseln je nach aktuellem Zustand) statt zwei Buttons pro Aktion –
         # spart Platz. ("ITEM-Liste laden" sitzt in Abschnitt 1, siehe
-        # _build_credentials.)
+        # _build_environment.)
         toggle_row = ttk.Frame(toolbar)
         toggle_row.pack(side="top", anchor="w")
 
@@ -967,12 +959,9 @@ class StacMonitorApp(tk.Tk):
     # ── Event Handler ─────────────────────────────────────────────────────────
 
     def _on_env_change(self):
-        self._auth = None
-        self._cred_btn.configure(text=self._CRED_BTN_LABEL, style="Amber.TButton")
         # Geladene Liste gehört zur alten Umgebung -> wieder "laden" statt "aktualisieren"
         self._items_loaded_once = False
-        self._load_btn.configure(text=self._LOAD_BTN_LABEL, state="disabled",
-                                 style="AmberBold.TButton")
+        self._load_btn.configure(text=self._LOAD_BTN_LABEL, style="AmberBold.TButton")
 
     def _open_stac_browser(self, item_id: Optional[str] = None):
         url = browser_url(self._env_var.get(), item_id)
@@ -1017,28 +1006,12 @@ class StacMonitorApp(tk.Tk):
                 self._show_no_thumb_btn.config(
                     text=self._SHOW_NO_THUMB_BTN_LABEL, style="TButton")
 
-    def _load_credentials(self):
-        env = self._env_var.get()
-        try:
-            cfg_path = Path(__file__).parent / "secrets" / "stac_credentials.json"
-            with open(cfg_path, encoding="utf-8") as f:
-                cfg = json.load(f)
-            creds          = cfg[env]
-            self._auth     = (creds["username"], creds["password"])
-            self._base_url = ENVIRONMENTS[env]
-            self._cred_btn.configure(text=self._CRED_LOADED_BTN_LABEL, style="Green.TButton")
-            self._load_btn.config(state="normal")
-            self._log_write(f"[Credentials] {env} – {creds['username']}\n")
-        except Exception as exc:
-            self._cred_btn.configure(text=self._CRED_BTN_LABEL, style="Amber.TButton")
-            self._log_write(f"[Credentials] FEHLER ({env}): {exc}\n")
-            messagebox.showerror("Credentials-Fehler", str(exc))
-
     # ── Laden ─────────────────────────────────────────────────────────────────
 
     def _load(self):
-        if not self._auth:
-            return
+        env = self._env_var.get()
+        self._base_url = ENVIRONMENTS[env]
+        self._log_write(f"[Umgebung] {env} – {self._base_url}\n")
         self._load_btn.configure(style="TButton")
         self._all_items.clear()
         self._asset_info.clear()
@@ -1064,7 +1037,7 @@ class StacMonitorApp(tk.Tk):
         try:
             if search:
                 self._log_write(f"[Laden] Prüfe exakte Item-ID: {search} …\n")
-                item = get_item_direct(self._base_url, self._auth, search)
+                item = get_item_direct(self._base_url, search)
                 if item is not None:
                     self._all_items = [item]
                     self._log_write(f"[OK] {item['id']} geladen (Direct-Lookup).\n")
@@ -1074,7 +1047,7 @@ class StacMonitorApp(tk.Tk):
                                 "lade gesamte Collection …\n")
             else:
                 self._log_write("[Laden] Hole alle Items der Collection …\n")
-            items = get_collection_items(self._base_url, self._auth, self._log_write)
+            items = get_collection_items(self._base_url, self._log_write)
             self._all_items = items
             self._log_write(f"[Laden] {len(items)} Items geladen.\n")
             self.after(0, self._apply_filters)
@@ -1086,7 +1059,7 @@ class StacMonitorApp(tk.Tk):
 
     def _set_busy(self, busy: bool):
         state = "disabled" if busy else "normal"
-        self._load_btn.config(state=state if self._auth else "disabled")
+        self._load_btn.config(state=state)
         if busy:
             self._check_btn.config(state="disabled")
             self._export_links_btn.config(state="disabled")
@@ -1737,7 +1710,7 @@ class StacMonitorApp(tk.Tk):
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=8) as pool:
             future_map = {
-                pool.submit(check_asset_info, href, self._auth): (iid, ak)
+                pool.submit(check_asset_info, href): (iid, ak)
                 for iid, ak, href in tasks
             }
             for fut in concurrent.futures.as_completed(future_map):
@@ -2163,7 +2136,7 @@ class StacMonitorApp(tk.Tk):
 
             self._log_write(f"[Download] {iid} / {ak}  →  {dest_path}\n")
             tmp_path = dest_path.with_name(dest_path.name + ".part")
-            result = download_asset(href, str(tmp_path), self._auth,
+            result = download_asset(href, str(tmp_path),
                                     progress_cb=self._download_progress_cb(ak))
             if result["ok"]:
                 tmp_path.rename(dest_path)
@@ -2261,9 +2234,9 @@ class StacMonitorApp(tk.Tk):
         if not sibling_id:
             return None
         sibling = next((it for it in self._all_items if it.get("id") == sibling_id), None)
-        if sibling is None and self._auth:
+        if sibling is None and self._base_url:
             try:
-                sibling = get_item_direct(self._base_url, self._auth, sibling_id)
+                sibling = get_item_direct(self._base_url, sibling_id)
             except Exception as exc:
                 self._log_write(f"[Viewer] KML-Lookup {sibling_id} fehlgeschlagen: {exc}\n")
                 return None

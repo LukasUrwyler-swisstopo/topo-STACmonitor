@@ -1,15 +1,22 @@
 """
 stac_api.py  –  STAC API Hilfsfunktionen für ch.swisstopo.spezialbefliegungen
 (Monitoring-Version: read-only, keine Delete-Funktionen)
+
+Kein Login nötig: Die STAC-API und die Assets sind für Lesezugriffe öffentlich.
 """
 
+import json
+import logging
 import math
 import re
 import time
 import requests
 import urllib3
+from pathlib import Path
 from urllib.parse import urljoin
 from typing import Dict, List, Optional, Tuple
+
+_log = logging.getLogger(__name__)
 
 # verify=False ist im Bundesnetz nötig, da proxy-bvcol.admin.ch HTTPS mit
 # eigenem Zertifikat terminiert (TLS-Interception). Die dadurch bei jedem
@@ -17,11 +24,32 @@ from typing import Dict, List, Optional, Tuple
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
-# Firmenproxy für externe Verbindungen (data.geo.admin.ch / sys-data.int.bgdi.ch)
-_PROXY = {
-    "http":  "http://proxy-bvcol.admin.ch:8080",
-    "https": "http://proxy-bvcol.admin.ch:8080",
-}
+# Firmenproxy für externe Verbindungen (data.geo.admin.ch / sys-data.int.bgdi.ch).
+# Quelle: proxys/proxy_config.json (erster Eintrag mit "enabled": true). Fehlt
+# die Datei (nicht versioniert) oder ist sie unbrauchbar, gilt der BVCOL-Proxy.
+_DEFAULT_PROXY_URL = "http://proxy-bvcol.admin.ch:8080"
+_PROXY_CONFIG_PATH = Path(__file__).resolve().parent.parent / "proxys" / "proxy_config.json"
+
+
+def load_proxy_url(cfg_path: Path = _PROXY_CONFIG_PATH) -> str:
+    """Liefert die URL des ersten aktivierten Proxys aus cfg_path, sonst den
+    BVCOL-Default."""
+    try:
+        with open(cfg_path, encoding="utf-8") as f:
+            cfg = json.load(f)
+        for entry in cfg.get("proxies", []):
+            if entry.get("enabled") and entry.get("url"):
+                return entry["url"]
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError, AttributeError) as exc:
+        _log.warning("Proxy-Konfiguration %s unbrauchbar (%s) – verwende %s",
+                     cfg_path, exc, _DEFAULT_PROXY_URL)
+    return _DEFAULT_PROXY_URL
+
+
+PROXY_URL = load_proxy_url()
+_PROXY = {"http": PROXY_URL, "https": PROXY_URL}
 
 COLLECTION_ID = "ch.swisstopo.spezialbefliegungen"
 
@@ -276,30 +304,29 @@ def _request(method: str, url: str, **kwargs) -> requests.Response:
         return call(url, proxies=None, **kwargs)
 
 
-def _session_get(url: str, auth: Tuple, params: dict = None) -> requests.Response:
-    return _request("get", url, auth=auth, params=params,
-                    verify=False, timeout=(30, 60))
+def _session_get(url: str, params: dict = None) -> requests.Response:
+    return _request("get", url, params=params, verify=False, timeout=(30, 60))
 
 
 # ─── Öffentliche API-Funktionen ───────────────────────────────────────────────
 
-def get_item_direct(base_url: str, auth: Tuple, item_id: str) -> Optional[Dict]:
+def get_item_direct(base_url: str, item_id: str) -> Optional[Dict]:
     """Holt ein einzelnes Item per exakter ID. Gibt None bei 404 zurück."""
     url = urljoin(base_url, f"collections/{COLLECTION_ID}/items/{item_id.strip()}")
-    r = _session_get(url, auth)
+    r = _session_get(url)
     if r.status_code == 404:
         return None
     r.raise_for_status()
     return r.json()
 
 
-def get_collection_items(base_url: str, auth: Tuple, log_fn=print) -> List[Dict]:
+def get_collection_items(base_url: str, log_fn=print) -> List[Dict]:
     """Holt alle Items der Collection mit Paginierung."""
     all_items = []
     url    = urljoin(base_url, f"collections/{COLLECTION_ID}/items")
     params = {"limit": 1000}
     while url:
-        r = _session_get(url, auth, params)
+        r = _session_get(url, params)
         r.raise_for_status()
         data = r.json()
         all_items.extend(data.get("features", []))
@@ -321,7 +348,7 @@ def filter_items(items: List[Dict], search_term: str = "") -> List[Dict]:
     return [item for item in items if term in item.get("id", "").lower()]
 
 
-def _probe_large_asset(href: str, auth: Tuple) -> Optional[int]:
+def _probe_large_asset(href: str) -> Optional[int]:
     """Prüft per GET Range: bytes=0-0, ob ein Asset > 50 GB ist (CloudFront
     blockiert HEAD/GET für solche Objekte mit Status 400, siehe swisstopo-
     Anleitung 'Downloading Large Assets (> 50 GB)'). Der Range-Request geht
@@ -332,9 +359,6 @@ def _probe_large_asset(href: str, auth: Tuple) -> Optional[int]:
     try:
         r = _request("get", href, headers=headers, verify=False,
                     timeout=(5, 15), allow_redirects=True, stream=True)
-        if r.status_code in (401, 403):
-            r = _request("get", href, headers=headers, auth=auth, verify=False,
-                        timeout=(5, 15), allow_redirects=True, stream=True)
         r.close()
         if r.status_code != 206:
             return None
@@ -347,7 +371,7 @@ def _probe_large_asset(href: str, auth: Tuple) -> Optional[int]:
         return None
 
 
-def check_asset_info(href: str, auth: Tuple) -> Dict:
+def check_asset_info(href: str) -> Dict:
     """HEAD-Request auf Asset-URL.
     Gibt dict mit status, size_bytes und last_modified zurück.
     status: HTTP-Code oder negativ (-1=kein href, -2=timeout, -3=exception,
@@ -359,9 +383,6 @@ def check_asset_info(href: str, auth: Tuple) -> Dict:
     try:
         r = _request("head", href, verify=False,
                     timeout=(5, 15), allow_redirects=True)
-        if r.status_code in (401, 403):
-            r = _request("head", href, auth=auth, verify=False,
-                        timeout=(5, 15), allow_redirects=True)
         result["status"] = r.status_code
         cl = r.headers.get("Content-Length", "")
         if cl.isdigit():
@@ -371,7 +392,7 @@ def check_asset_info(href: str, auth: Tuple) -> Dict:
             result["last_modified"] = lm
 
         if r.status_code == 400:
-            total_size = _probe_large_asset(href, auth)
+            total_size = _probe_large_asset(href)
             if total_size is not None:
                 result["status"]     = -4
                 result["size_bytes"] = total_size
@@ -401,14 +422,10 @@ def _iter_response_to_file(r: requests.Response, fh, offset: int,
     return downloaded
 
 
-def _download_stream(href: str, dest_path: str, auth: Tuple,
-                      progress_cb=None) -> Dict:
+def _download_stream(href: str, dest_path: str, progress_cb=None) -> Dict:
     """Normaler Download per GET-Stream (Assets ≤ 50 GB)."""
     r = _request("get", href, verify=False, timeout=(30, 300),
                 allow_redirects=True, stream=True)
-    if r.status_code in (401, 403):
-        r = _request("get", href, auth=auth, verify=False, timeout=(30, 300),
-                    allow_redirects=True, stream=True)
     if r.status_code != 200:
         r.close()
         return {"ok": False, "bytes": 0, "error": f"HTTP {r.status_code}"}
@@ -424,7 +441,7 @@ def _download_stream(href: str, dest_path: str, auth: Tuple,
     return {"ok": True, "bytes": downloaded, "error": None}
 
 
-def _download_ranged(href: str, dest_path: str, auth: Tuple, total_size: int,
+def _download_ranged(href: str, dest_path: str, total_size: int,
                       chunk_size: int, progress_cb=None) -> Dict:
     """Download eines Assets > 50 GB per sequenziellen HTTP-Range-Requests
     (siehe swisstopo-Anleitung 'Downloading Large Assets (> 50 GB)'), mit
@@ -440,9 +457,6 @@ def _download_ranged(href: str, dest_path: str, auth: Tuple, total_size: int,
                 try:
                     r = _request("get", href, headers=headers, verify=False,
                                 timeout=(30, 600), allow_redirects=True, stream=True)
-                    if r.status_code in (401, 403):
-                        r = _request("get", href, headers=headers, auth=auth, verify=False,
-                                    timeout=(30, 600), allow_redirects=True, stream=True)
                     if r.status_code not in (200, 206):
                         r.close()
                         return {"ok": False, "bytes": downloaded,
@@ -461,7 +475,7 @@ def _download_ranged(href: str, dest_path: str, auth: Tuple, total_size: int,
     return {"ok": True, "bytes": downloaded, "error": None}
 
 
-def download_asset(href: str, dest_path: str, auth: Tuple, progress_cb=None,
+def download_asset(href: str, dest_path: str, progress_cb=None,
                     chunk_size: int = DEFAULT_DOWNLOAD_CHUNK_BYTES) -> Dict:
     """Lädt ein Asset nach dest_path herunter. Erkennt Assets > 50 GB
     automatisch (HEAD liefert dafür 400, siehe check_asset_info/
@@ -472,21 +486,18 @@ def download_asset(href: str, dest_path: str, auth: Tuple, progress_cb=None,
     zurück."""
     try:
         r = _request("head", href, verify=False, timeout=(5, 15), allow_redirects=True)
-        if r.status_code in (401, 403):
-            r = _request("head", href, auth=auth, verify=False,
-                        timeout=(5, 15), allow_redirects=True)
 
         if r.status_code == 400:
-            total_size = _probe_large_asset(href, auth)
+            total_size = _probe_large_asset(href)
             if total_size is not None:
-                return _download_ranged(href, dest_path, auth, total_size,
+                return _download_ranged(href, dest_path, total_size,
                                         chunk_size, progress_cb)
             return {"ok": False, "bytes": 0, "error": "HTTP 400"}
 
         if r.status_code != 200:
             return {"ok": False, "bytes": 0, "error": f"HTTP {r.status_code}"}
 
-        return _download_stream(href, dest_path, auth, progress_cb)
+        return _download_stream(href, dest_path, progress_cb)
     except requests.exceptions.Timeout:
         return {"ok": False, "bytes": 0, "error": "timeout"}
     except Exception as exc:
