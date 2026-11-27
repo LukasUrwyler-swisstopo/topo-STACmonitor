@@ -524,5 +524,11 @@ def test_load_proxy_url_fallback(tmp_path):
     assert api.load_proxy_url(kaputt) == api._DEFAULT_PROXY_URL
 
 
+def test_proxy_config_example_gueltig():
+    # Die versionierte Vorlage muss vom Loader lesbar bleiben.
+    vorlage = _PROJECT_ROOT / "proxys" / "proxy_config.example.json"
+    assert api.load_proxy_url(vorlage) == "http://proxy-bvcol.admin.ch:8080"
+
+
 if __name__ == "__main__":
     raise SystemExit(pytest.main([__file__, "-v"]))

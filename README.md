@@ -116,11 +116,12 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 Zugangsdaten braucht der Monitor keine: Er liest nur (GET/HEAD), und die
 STAC-API von swisstopo/BGDI ist für Lesezugriffe öffentlich.
 
-Optional: `proxys/proxy_config.json` anpassen, falls ein anderer
-Firmenproxy als `proxy-bvcol.admin.ch:8080` verwendet wird. Verwendet wird
-der erste Eintrag unter `proxies` mit `"enabled": true`. Fehlt die Datei,
-gilt `proxy-bvcol.admin.ch:8080`. Der Ordner `proxys/` ist in `.gitignore`
-ausgeschlossen und wird nicht versioniert.
+Optional: Für einen anderen Firmenproxy als `proxy-bvcol.admin.ch:8080` die
+Vorlage `proxys/proxy_config.example.json` nach `proxys/proxy_config.json`
+kopieren und anpassen. Verwendet wird der erste Eintrag unter `proxies` mit
+`"enabled": true`. Fehlt die Datei, gilt `proxy-bvcol.admin.ch:8080`.
+Nur `proxy_config.json` ist in `.gitignore` ausgeschlossen, damit lokale
+Anpassungen (z.B. Zugangsdaten in der Proxy-URL) nicht ins Repo gelangen.
 
 Im Bundesnetz läuft der Zugriff automatisch über diesen Proxy; ausserhalb
 (z.B. privater Rechner) schaltet das Tool selbstständig auf eine
@@ -133,4 +134,5 @@ Direktverbindung um.
 | `GUI_STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
 | `test/test_functions.py` | Unit-Tests (pytest) |
-| `proxys/proxy_config.json` | Proxy-Konfiguration, optional (nicht versioniert) |
+| `proxys/proxy_config.example.json` | Vorlage für die Proxy-Konfiguration |
+| `proxys/proxy_config.json` | Lokale Proxy-Konfiguration, optional (nicht versioniert) |
