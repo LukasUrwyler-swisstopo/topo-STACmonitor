@@ -10,9 +10,8 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 
 ## Schnellstart
 
-1. **Kein Login nötig:** Die STAC-API ist für Lesezugriffe öffentlich. Optional
-   lässt sich der Firmenproxy im Ordner `proxys/` anpassen, siehe
-   [Einrichtung](#einrichtung)
+1. **Kein Login nötig:** Die STAC-API ist für Lesezugriffe öffentlich. Der
+   Firmenproxy ist im Code hinterlegt, siehe [Einrichtung](#einrichtung)
 2. Tool starten: WIN-Taste + cmd (Terminal starten):
 
    ```bash
@@ -116,15 +115,17 @@ abgekündigt – die Endpunkte stehen in `ENVIRONMENTS` in `api/stac_api.py`.
 Zugangsdaten braucht der Monitor keine: Er liest nur (GET/HEAD), und die
 STAC-API von swisstopo/BGDI ist für Lesezugriffe öffentlich.
 
-Optional: `proxys/proxy_config.json` anpassen, falls ein anderer
-Firmenproxy als `proxy-bvcol.admin.ch:8080` verwendet wird. Verwendet wird
-der erste Eintrag unter `proxies` mit `"enabled": true`. Fehlt die Datei,
-gilt `proxy-bvcol.admin.ch:8080`. Der Ordner `proxys/` ist in `.gitignore`
-ausgeschlossen und wird nicht versioniert.
+Der Firmenproxy `proxy-bvcol.admin.ch:8080` ist in `api/stac_api.py`
+hinterlegt (`_DEFAULT_PROXY_URL`). Im Bundesnetz läuft der Zugriff
+automatisch darüber; ausserhalb (z.B. privater Rechner) schaltet das Tool
+selbstständig auf eine Direktverbindung um.
 
-Im Bundesnetz läuft der Zugriff automatisch über diesen Proxy; ausserhalb
-(z.B. privater Rechner) schaltet das Tool selbstständig auf eine
-Direktverbindung um.
+Nur falls ein anderer Proxy nötig ist: Datei `proxys/proxy_config.json`
+anlegen. Verwendet wird der erste Eintrag mit `"enabled": true`:
+
+```json
+{"proxies": [{"url": "http://proxy.example.ch:8080", "enabled": true}]}
+```
 
 ## Dateien
 
@@ -133,4 +134,3 @@ Direktverbindung um.
 | `GUI_STACmonitor.py` | GUI-Anwendung (Tkinter) |
 | `api/stac_api.py` | STAC-API-Hilfsfunktionen (inkl. Download) |
 | `test/test_functions.py` | Unit-Tests (pytest) |
-| `proxys/proxy_config.json` | Proxy-Konfiguration, optional (nicht versioniert) |
